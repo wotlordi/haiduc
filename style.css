@@ -151,3 +151,6 @@ textarea.body:focus{outline:none}
 .acct-btns{display:flex;gap:12px;flex-shrink:0}
 .pass-box{display:flex;gap:6px;padding:8px 16px;border-top:1px solid var(--line)}
 .pass-box input{flex:1;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 8px}
+.brand-name{display:flex;align-items:center;gap:8px}
+.logo{width:30px;height:30px;flex-shrink:0;object-fit:contain}
+.login-card .logo{width:48px;height:48px}

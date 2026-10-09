@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Haiduc</title>
+<link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta name="theme-color" content="#1d1f22">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -13,7 +17,7 @@
 <body>
 <section class="login" id="login" hidden>
   <div class="login-card">
-    <h1>Haiduc</h1>
+    <h1 class="brand-name"><img src="img/logo.png" alt="" class="logo">Haiduc</h1>
     <p>Notes, links and tasks for the people on the members list.</p>
     <form id="loginForm">
       <label for="loginEmail" class="hint">Email</label>
@@ -31,7 +35,7 @@
 </section>
 <div class="app" id="app" hidden>
   <aside class="side" id="side">
-    <div class="brand"><h1>Haiduc</h1><span class="status" id="status">connecting…</span></div>
+    <div class="brand"><h1 class="brand-name"><img src="img/logo.png" alt="" class="logo">Haiduc</h1><span class="status" id="status">connecting…</span></div>
     <div class="nav">
       <button id="navNotes" aria-pressed="true">Notes <span class="count" id="cNotes">0</span></button>
       <button id="navTasks" aria-pressed="false">Tasks <span class="count" id="cTasks">0</span></button>
