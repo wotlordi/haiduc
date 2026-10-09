@@ -16,9 +16,15 @@
     <h1>Haiduc</h1>
     <p>Notes, links and tasks for the people on the members list.</p>
     <form id="loginForm">
-      <label for="loginEmail" class="hint">Your email</label>
+      <label for="loginEmail" class="hint">Email</label>
       <input id="loginEmail" type="email" autocomplete="email" placeholder="name@example.com" required>
-      <button class="btn primary" id="loginBtn" type="submit">Send sign-in link</button>
+      <label for="loginPass" class="hint">Password</label>
+      <input id="loginPass" type="password" autocomplete="current-password" minlength="6" placeholder="At least 6 characters" required>
+      <button class="btn primary" id="loginBtn" type="submit">Sign in</button>
+      <div class="login-alt">
+        <button type="button" class="link" id="signupBtn">First time here? Create account</button>
+        <button type="button" class="link" id="magicBtn">Email me a link instead</button>
+      </div>
     </form>
     <div class="msg" id="loginMsg" hidden></div>
   </div>
@@ -36,7 +42,7 @@
     </div>
     <div class="label" id="listLabel">All notes</div>
     <ul class="list" id="list"></ul>
-    <div class="account"><span id="meEmail"></span><button id="signOut">Sign out</button></div>
+    <div class="account"><span id="meEmail"></span><span class="acct-btns"><button id="setPass">Set password</button><button id="signOut">Sign out</button></span></div>
   </aside>
 
   <main class="main" id="main">

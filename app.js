@@ -219,13 +219,50 @@ async function enter(session){
   $('login').hidden=true;$('app').hidden=false;$('meEmail').textContent=S.me;
   renderAll();await loadAll();subscribe();
 }
+function authMsg(err){
+  const m=(err&&err.message)||'';
+  if(/invalid login credentials/i.test(m))return 'Wrong email or password. First time here? Use "Create account".';
+  if(/already registered/i.test(m))return 'This email already has an account. Sign in instead, or use "Email me a link" if you never set a password.';
+  if(/email not confirmed/i.test(m))return 'This account still needs email confirmation. Ask the owner to turn off "Confirm email" in Supabase, or use the link we emailed.';
+  if(/rate limit/i.test(m))return 'Too many emails were sent in the last hour. Try again later, or sign in with your password.';
+  return m||'Something went wrong. Try again.';
+}
+function creds(){return{email:$('loginEmail').value.trim(),password:$('loginPass').value}}
+function busy(b,on,label){b.disabled=on;if(label)b.textContent=label}
 $('loginForm').addEventListener('submit',async e=>{
-  e.preventDefault();const email=$('loginEmail').value.trim();if(!email)return;
-  const btn=$('loginBtn');btn.disabled=true;btn.textContent='Sending…';
-  const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
-  btn.disabled=false;btn.textContent='Send sign-in link';
-  if(error)showLogin(error.message,true);else showLogin(`Check ${email} for a sign-in link. You can close this tab after clicking it.`);
+  e.preventDefault();const {email,password}=creds();if(!email||!password)return;
+  const b=$('loginBtn');busy(b,true,'Signing in…');
+  const {error}=await sb.auth.signInWithPassword({email,password});
+  busy(b,false,'Sign in');if(error)showLogin(authMsg(error),true);
 });
+$('signupBtn').onclick=async()=>{
+  const {email,password}=creds();
+  if(!email||password.length<6){showLogin('Enter your email and a password of at least 6 characters, then press "Create account".',true);return}
+  const b=$('signupBtn');busy(b,true);
+  const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
+  busy(b,false);
+  if(error){showLogin(authMsg(error),true);return}
+  if(data&&data.user&&Array.isArray(data.user.identities)&&data.user.identities.length===0){showLogin(authMsg({message:'already registered'}),true);return}
+  if(!data.session)showLogin(`Account created. Check ${email} for a confirmation email, then sign in here.`);
+};
+$('magicBtn').onclick=async()=>{
+  const email=$('loginEmail').value.trim();if(!email){showLogin('Enter your email first.',true);return}
+  const b=$('magicBtn');busy(b,true);
+  const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+  busy(b,false);
+  if(error)showLogin(authMsg(error),true);else showLogin(`Check ${email} for a sign-in link. Click only the newest email. After signing in, use "Set password" at the bottom left.`);
+};
+$('setPass').onclick=async()=>{
+  const b=$('setPass');
+  if(!b.dataset.open){
+    const box=document.createElement('form');box.id='passBox';box.className='pass-box';
+    box.innerHTML='<input id="newPass" type="password" minlength="6" autocomplete="new-password" placeholder="New password (6+ characters)" required><button class="btn primary" type="submit">Save</button>';
+    b.closest('.account').before(box);b.dataset.open='1';b.textContent='Cancel';$('newPass').focus();
+    box.onsubmit=async ev=>{ev.preventDefault();const p=$('newPass').value;if(p.length<6)return;
+      const {error}=await sb.auth.updateUser({password:p});
+      if(error)toast(authMsg(error));else{toast('Password saved. Next time, sign in with email and password.');box.remove();delete b.dataset.open;b.textContent='Set password'}};
+  }else{const box=$('passBox');box&&box.remove();delete b.dataset.open;b.textContent='Set password'}
+};
 $('signOut').onclick=async()=>{if(S.dirty)await flushSave();if(channel)sb.removeChannel(channel);await sb.auth.signOut();S.notes.clear();S.tasks.clear();S.live=false;showLogin()};
 
 function boot(){
@@ -236,7 +273,14 @@ function boot(){
     if(session&&!entered){entered=true;setTimeout(()=>enter(session),0)}
     if(!session&&ev==='SIGNED_OUT'){entered=false}
   });
-  sb.auth.getSession().then(({data})=>{if(!data.session&&!entered)showLogin()});
+  const hp=new URLSearchParams((location.hash||'').slice(1)+'&'+(location.search||'').slice(1));
+  const linkErr=hp.get('error_description')||hp.get('error');
+  sb.auth.getSession().then(({data})=>{
+    if(!data.session&&!entered){
+      showLogin(linkErr?('That sign-in link didn\'t work ('+linkErr.replace(/\+/g,' ')+'). It was probably expired or already used. Sign in with your password, or request a new link.'):'',!!linkErr);
+      if(linkErr)history.replaceState(null,'',location.pathname);
+    }
+  });
 }
 boot();
 })();
