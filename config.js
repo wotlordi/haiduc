@@ -2,5 +2,5 @@
 // by the database rules in supabase/schema.sql (only emails in `members` get in).
 window.VAULT_CONFIG = {
   SUPABASE_URL: "https://rjjegzznqhzigwoxiqfu.supabase.co",
-  SUPABASE_ANON_KEY: "sb_secret_LrFWraL11yzxdbImIcns_w_vUfY_SXK"
+  SUPABASE_ANON_KEY: "sb_publishable_PyklZgjmzydulSPNmaPKsw_CESzd-rF"
 };
