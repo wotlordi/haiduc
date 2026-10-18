@@ -1,7 +1,8 @@
 (function(){
 const $=id=>document.getElementById(id);
 const CFG=window.VAULT_CONFIG||{};
-const S={notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
+const PH=window.matchMedia('(max-width:720px)');
+const S={unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
 let sb=null, saveTimer=null, pendingSave=null, channel=null;
 const STATUS=[['todo','To do'],['doing','In progress'],['done','Done']];
 
@@ -31,28 +32,61 @@ async function run(q,kind){
   if(error){console.error(error);toast(error.code==='42501'?'You don\'t have access to edit Haiduc.':'Could not save '+kind+'. Check your connection.');return false}
   return true;
 }
-function scheduleSave(){S.dirty=true;$('status').textContent='editing…';clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,700)}
+/* Saving: every edit is copied to this device at once (draft), then sent to the server.
+   A note only counts as saved after the server confirms it; failed saves are retried. */
+const DRAFT='haiduc.draft.';
+let saving=null,again=false,retryTimer=null,saveState='saved';
+function draftPut(n){try{localStorage.setItem(DRAFT+n.id,JSON.stringify({title:n.title,body:n.body,at:Date.now(),createdAt:n.createdAt||Date.now()}))}catch(e){}}
+function draftDel(id){try{localStorage.removeItem(DRAFT+id)}catch(e){}}
+function draftsAll(){const out={};try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(DRAFT)){try{out[k.slice(DRAFT.length)]=JSON.parse(localStorage.getItem(k))}catch(e){}}}}catch(e){}return out}
+function markDirty(n){S.unsaved.set(n.id,(S.unsaved.get(n.id)||0)+1);draftPut(n);setSaveState('dirty');clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,1200)}
+function scheduleSave(){const n=S.notes.get(S.cur);if(n)markDirty(n)}
 async function flushSave(){
-  clearTimeout(saveTimer);const n=S.notes.get(S.cur);if(!n||!S.dirty)return;
-  if(pendingSave)await pendingSave;
-  S.dirty=false;n.updatedAt=Date.now();n.updatedBy=S.me;
-  pendingSave=run(sb.from('notes').upsert({id:n.id,title:n.title||'Untitled',body:n.body||'',updated_at:new Date(n.updatedAt).toISOString(),updated_by:S.me}),'note');
-  await pendingSave;pendingSave=null;setStatus();renderList();
+  clearTimeout(saveTimer);clearTimeout(retryTimer);
+  if(saving){again=true;return saving}
+  if(!S.unsaved.size){setSaveState('saved');return}
+  setSaveState('saving');
+  saving=(async()=>{
+    let failed=false;
+    for(const [id,ver] of [...S.unsaved]){
+      const n=S.notes.get(id);if(!n){S.unsaved.delete(id);draftDel(id);continue}
+      n.updatedAt=Date.now();n.updatedBy=S.me;
+      let res;try{res=await sb.from('notes').upsert({id:n.id,title:n.title||'Untitled',body:n.body||'',updated_at:new Date(n.updatedAt).toISOString(),updated_by:S.me})}catch(e){res={error:e}}
+      if(res.error){failed=true;console.error(res.error);continue}
+      if(S.unsaved.get(id)===ver){S.unsaved.delete(id);draftDel(id)}
+    }
+    return failed;
+  })();
+  const failed=await saving;saving=null;
+  if(again){again=false;return flushSave()}
+  if(failed){setSaveState('error');retryTimer=setTimeout(flushSave,5000)}
+  else if(S.unsaved.size){setSaveState('dirty');saveTimer=setTimeout(flushSave,400)}
+  else setSaveState('saved');
+  renderList();
 }
-function setStatus(){const s=$('status');s.textContent=S.live?'synced':'connecting…';s.className='status'}
+function setSaveState(st){
+  saveState=st;const b=$('saveBtn');
+  if(b){b.dataset.state=st;b.textContent={dirty:'Save',saving:'Saving…',saved:'Saved ✓',error:'Not saved · Retry'}[st];b.disabled=st==='saving'||st==='saved'}
+  setStatus();
+}
+function setStatus(){const s=$('status');
+  if(!S.live){s.textContent='connecting…';s.className='status';return}
+  s.textContent={dirty:'unsaved changes',saving:'saving…',saved:'all saved',error:'not saved, retrying'}[saveState];
+  s.className='status'+(saveState==='error'?' off':'');
+}
 async function createNote(title){
   let t=(title||'Untitled').trim()||'Untitled';
   if(!title){let i=1;while(byTitle(t))t='Untitled '+(++i)}
   const id=newId('n');const now=Date.now();
-  S.notes.set(id,{id,title:t,body:'',createdAt:now,updatedAt:now,updatedBy:S.me});open(id,'edit');
-  await run(sb.from('notes').insert({id,title:t,body:'',updated_by:S.me}),'note');
+  const note={id,title:t,body:'',createdAt:now,updatedAt:now,updatedBy:S.me};S.notes.set(id,note);open(id,'edit');
+  markDirty(note);flushSave();
   setTimeout(()=>{const ti=$('titleIn');if(ti&&!title){ti.focus();ti.select()}},30);
 }
 async function saveTask(t){S.tasks.set(t.id,t);renderBoard();renderCounts();renderLinks();await run(sb.from('tasks').upsert(toTask(t)),'task')}
 
 /* ---------- rendering ---------- */
 function renderAll(){renderList();renderMain();renderLinks();renderCounts();setStatus()}
-function renderCounts(){$('cNotes').textContent=S.notes.size;$('cTasks').textContent=[...S.tasks.values()].filter(t=>t.status!=='done').length}
+function renderCounts(){const open=[...S.tasks.values()].filter(t=>t.status!=='done').length;$('tbCount').textContent=open?open:'';$('cNotes').textContent=S.notes.size;$('cTasks').textContent=[...S.tasks.values()].filter(t=>t.status!=='done').length}
 function renderList(){
   const ul=$('list');const q=S.q.trim().toLowerCase();
   let notes=sortedNotes();if(q)notes=notes.filter(n=>(n.title||'').toLowerCase().includes(q)||(n.body||'').toLowerCase().includes(q));
@@ -69,11 +103,15 @@ function renderMarkdown(src){
   return DOMPurify.sanitize(html,{ADD_ATTR:['data-note']}).replace(/==([^=\n]+)==/g,'<mark>$1</mark>');
 }
 function renderMain(){
+  const phone=PH.matches;
+  $('app').classList.toggle('ph-list',phone&&S.view==='notes'&&(S.phList||!S.notes.get(S.cur)));
+  $('tabbar').hidden=!phone||$('app').hidden;
+  $('tbNotes').setAttribute('aria-pressed',S.view==='notes');$('tbTasks').setAttribute('aria-pressed',S.view==='tasks');
   $('app').classList.toggle('tasks-mode',S.view==='tasks');
   $('navNotes').setAttribute('aria-pressed',S.view==='notes');$('navTasks').setAttribute('aria-pressed',S.view==='tasks');
   $('noteView').hidden=S.view!=='notes';$('taskView').hidden=S.view!=='tasks';
   const n=S.notes.get(S.cur);
-  $('modeSeg').hidden=S.view!=='notes'||!n;$('delBtn').hidden=S.view!=='notes'||!n;$('linksBtn').hidden=S.view!=='notes'||!n;
+  $('modeSeg').hidden=S.view!=='notes'||!n;$('delBtn').hidden=S.view!=='notes'||!n;$('saveBtn').hidden=S.view!=='notes'||!n;setSaveState(saveState);$('linksBtn').hidden=S.view!=='notes'||!n;
   $('delBtn').classList.remove('arm');$('delBtn').textContent='Delete';
   if(S.view==='tasks'){$('crumbs').textContent='Tasks';renderBoard();return}
   $('mEdit').setAttribute('aria-pressed',S.mode==='edit');$('mRead').setAttribute('aria-pressed',S.mode==='read');
@@ -98,20 +136,22 @@ function renderMain(){
   }else{
     v.dataset.id='';
     v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta">${meta}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
+    if(PH.matches)v.querySelector('.note-inner').insertAdjacentHTML('beforeend','<section class="links-inline" id="linksInline"></section>');
     v.querySelectorAll('#prose input[type=checkbox]').forEach((cb,i)=>{cb.disabled=false;cb.onchange=()=>toggleCheck(n,i)});
   }
 }
 function autosize(t){t.style.height='auto';t.style.height=Math.max(t.scrollHeight,window.innerHeight*.6)+'px'}
-function toggleCheck(n,idx){let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});S.dirty=true;flushSave()}
+function toggleCheck(n,idx){let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});markDirty(n);flushSave()}
 function renderLinks(){
   const L=$('links');const n=S.notes.get(S.cur);
   if(!n||S.view!=='notes'){L.innerHTML='<div class="label">Links</div><div class="none">Open a note to see what links to it.</div>';return}
   const back=backlinks(n);const out=[...new Set(linksIn(n.body))];const tasks=[...S.tasks.values()].filter(t=>t.noteId===n.id);
   const t0=(n.title||'').trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   const snippet=src=>{const m=(src||'').match(new RegExp('[^\\n]{0,40}\\[\\['+t0+'[^\\]]*\\]\\][^\\n]{0,40}','i'));return m?m[0]:''};
-  L.innerHTML=`<div class="label">Backlinks · ${back.length}</div>${back.length?'<ul>'+back.map(b=>`<li><button data-open="${esc(b.id)}">${esc(b.title)}</button><div class="x">${esc(snippet(b.body))}</div></li>`).join('')+'</ul>':'<div class="none">No other note links here yet.</div>'}
+  const html=`<div class="label">Backlinks · ${back.length}</div>${back.length?'<ul>'+back.map(b=>`<li><button data-open="${esc(b.id)}">${esc(b.title)}</button><div class="x">${esc(snippet(b.body))}</div></li>`).join('')+'</ul>':'<div class="none">No other note links here yet.</div>'}
   <div class="label">Outgoing · ${out.length}</div>${out.length?'<ul>'+out.map(t=>{const ex=byTitle(t);return `<li><button data-title="${esc(t)}" style="${ex?'':'color:var(--muted)'}">${esc(t)}${ex?'':' (new)'}</button></li>`}).join('')+'</ul>':'<div class="none">Type [[Note name]] to link.</div>'}
   <div class="label">Tasks · ${tasks.length}</div>${tasks.length?'<ul>'+tasks.map(t=>`<li><button class="tk" data-tasks="1">${t.status==='done'?'✓ ':''}${esc(t.title)}</button></li>`).join('')+'</ul>':'<div class="none">No tasks linked to this note.</div>'}`;
+  L.innerHTML=html;const inl=$('linksInline');if(inl)inl.innerHTML=html;
 }
 function renderBoard(){
   const sel=$('tNote');const cur=sel.value;
@@ -151,7 +191,7 @@ $('board').addEventListener('dragover',e=>{const col=e.target.closest('.col');if
 $('board').addEventListener('drop',async e=>{const col=e.target.closest('.col');document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'));if(col&&dragId){e.preventDefault();const t=S.tasks.get(dragId);dragId=null;if(t&&t.status!==col.dataset.s)await saveTask({...t,status:col.dataset.s})}});
 $('board').addEventListener('dragend',()=>{dragId=null;document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'))});
 
-function open(id,mode){if(S.dirty)flushSave();S.cur=id;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
+function open(id,mode){if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
 $('list').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)open(b.dataset.id,'read')});
 $('links').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
@@ -159,29 +199,38 @@ $('links').addEventListener('click',e=>{
   else if(b.dataset.title){const ex=byTitle(b.dataset.title);ex?open(ex.id,'read'):createNote(b.dataset.title)}
   else if(b.dataset.tasks){S.view='tasks';renderAll()}
 });
-$('noteView').addEventListener('click',e=>{const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
-$('navNotes').onclick=()=>{if(S.dirty)flushSave();S.view='notes';renderAll()};
-$('navTasks').onclick=()=>{if(S.dirty)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
+$('noteView').addEventListener('click',e=>{
+  const lb=e.target.closest('#linksInline button');
+  if(lb){if(lb.dataset.open)open(lb.dataset.open,'read');else if(lb.dataset.title){const ex=byTitle(lb.dataset.title);ex?open(ex.id,'read'):createNote(lb.dataset.title)}else if(lb.dataset.tasks){S.view='tasks';renderAll()}return}
+  const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
+$('navNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
+$('navTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
 $('mEdit').onclick=()=>{S.mode='edit';renderMain();setTimeout(()=>$('bodyIn')&&$('bodyIn').focus(),20)};
-$('mRead').onclick=()=>{if(S.dirty)flushSave();S.mode='read';renderMain();renderLinks()};
+$('mRead').onclick=()=>{if(S.unsaved.size)flushSave();S.mode='read';renderMain();renderLinks()};
 $('newNote').onclick=()=>createNote();
+$('saveBtn').onclick=()=>{const n=S.notes.get(S.cur);if(n&&!S.unsaved.size)return;flushSave()};
 $('q').oninput=e=>{S.q=e.target.value;renderList()};
-$('menuBtn').onclick=()=>$('app').classList.toggle('drawer');
+$('menuBtn').onclick=()=>{if(S.unsaved.size)flushSave();S.phList=true;S.mode='read';renderAll()};
+$('tbNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';S.phList=true;renderAll()};
+$('tbTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';renderAll()};
+$('tbNew').onclick=()=>{if(S.view==='tasks'){const t=$('tTitle');t.scrollIntoView({block:'center'});t.focus();}else createNote()};
+PH.addEventListener('change',()=>renderAll());
 $('linksBtn').onclick=()=>$('app').classList.toggle('show-links');
 document.addEventListener('click',e=>{const app=$('app');if(app.classList.contains('drawer')&&!e.target.closest('#side')&&!e.target.closest('#menuBtn'))app.classList.remove('drawer')});
 $('delBtn').onclick=async()=>{
   const b=$('delBtn');const n=S.notes.get(S.cur);if(!n)return;
   if(!b.classList.contains('arm')){b.classList.add('arm');b.textContent='Confirm delete';setTimeout(()=>{b.classList.remove('arm');b.textContent='Delete'},3000);return}
-  clearTimeout(saveTimer);S.dirty=false;S.notes.delete(n.id);S.cur=null;renderAll();await run(sb.from('notes').delete().eq('id',n.id),'note');toast('Note deleted');
+  S.unsaved.delete(n.id);draftDel(n.id);S.notes.delete(n.id);S.cur=null;renderAll();await run(sb.from('notes').delete().eq('id',n.id),'note');toast('Note deleted');
 };
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='e'&&S.view==='notes'&&S.cur){e.preventDefault();S.mode==='edit'?$('mRead').click():$('mEdit').click()}
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();flushSave()}
 });
-window.addEventListener('beforeunload',e=>{if(S.dirty){flushSave();e.preventDefault()}});
+window.addEventListener('beforeunload',e=>{if(S.unsaved.size){flushSave();e.preventDefault();e.returnValue=''}});
+window.addEventListener('pagehide',()=>{if(S.unsaved.size)flushSave()});
 
 /* ---------- live data ---------- */
-function isTyping(id){return id===S.cur&&S.mode==='edit'&&(S.dirty||['bodyIn','titleIn'].includes(document.activeElement&&document.activeElement.id))}
+function isTyping(id){return S.unsaved.has(id)||id===S.cur&&S.mode==='edit'&&(['bodyIn','titleIn'].includes(document.activeElement&&document.activeElement.id))}
 function onChange(table,p){
   const isNotes=table==='notes';const map=isNotes?S.notes:S.tasks;
   if(p.eventType==='DELETE'){const id=p.old&&p.old.id;if(!id)return;map.delete(id);if(isNotes&&id===S.cur)S.cur=null}
@@ -193,9 +242,21 @@ function onChange(table,p){
 async function loadAll(){
   const [n,t]=await Promise.all([sb.from('notes').select('*'),sb.from('tasks').select('*')]);
   if(n.error||t.error){toast('Could not load your notes. Reload the page.');return}
-  S.notes=new Map(n.data.map(r=>[r.id,fromNote(r)]));S.tasks=new Map(t.data.map(r=>[r.id,fromTask(r)]));
+  const fresh=new Map(n.data.map(r=>[r.id,fromNote(r)]));
+  // never let server data replace text that hasn't reached the server yet
+  for(const id of S.unsaved.keys()){const local=S.notes.get(id);if(local)fresh.set(id,local)}
+  let restored=0;const drafts=draftsAll();
+  for(const [id,d] of Object.entries(drafts)){
+    if(S.unsaved.has(id)||!d)continue;const srv=fresh.get(id);
+    if(srv&&(srv.updatedAt>=d.at||(srv.body===d.body&&srv.title===d.title))){draftDel(id);continue}
+    const note=srv?{...srv,title:d.title,body:d.body}:{id,title:d.title||'Untitled',body:d.body||'',createdAt:d.createdAt||d.at,updatedAt:d.at,updatedBy:S.me};
+    fresh.set(id,note);S.unsaved.set(id,1);restored++;
+  }
+  S.notes=fresh;S.tasks=new Map(t.data.map(r=>[r.id,fromTask(r)]));
   if(!S.cur||!S.notes.has(S.cur)){const last=lsGet('vault.cur');S.cur=last&&S.notes.has(last)?last:(S.notes.size?sortedNotes()[0].id:null)}
   S.live=true;renderAll();
+  if(restored)toast(restored===1?'Restored 1 note that hadn\'t been saved yet. Saving it now.':'Restored '+restored+' notes that hadn\'t been saved yet. Saving them now.');
+  if(S.unsaved.size)flushSave();
 }
 function subscribe(){
   if(channel)sb.removeChannel(channel);
@@ -205,11 +266,12 @@ function subscribe(){
     .subscribe(st=>{if(st==='SUBSCRIBED'&&S.live)loadAll()});
 }
 // refresh after the tab was asleep (laptop lid, phone background)
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.live&&!S.dirty)loadAll()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(S.unsaved.size)flushSave()}else if(S.live)loadAll()});
+window.addEventListener('online',()=>{if(S.unsaved.size)flushSave()});
 
 /* ---------- auth ---------- */
 function showLogin(msg,isErr){
-  $('app').hidden=true;$('login').hidden=false;
+  $('app').hidden=true;$('login').hidden=false;$('tabbar').hidden=true;
   const m=$('loginMsg');m.textContent=msg||'';m.className='msg'+(isErr?' err':'');m.hidden=!msg;
 }
 async function enter(session){
@@ -263,7 +325,7 @@ $('setPass').onclick=async()=>{
       if(error)toast(authMsg(error));else{toast('Password saved. Next time, sign in with email and password.');box.remove();delete b.dataset.open;b.textContent='Set password'}};
   }else{const box=$('passBox');box&&box.remove();delete b.dataset.open;b.textContent='Set password'}
 };
-$('signOut').onclick=async()=>{if(S.dirty)await flushSave();if(channel)sb.removeChannel(channel);await sb.auth.signOut();S.notes.clear();S.tasks.clear();S.live=false;showLogin()};
+$('signOut').onclick=async()=>{if(S.unsaved.size)await flushSave();if(channel)sb.removeChannel(channel);await sb.auth.signOut();S.notes.clear();S.tasks.clear();S.live=false;showLogin()};
 
 function boot(){
   if(!CFG.SUPABASE_URL||!CFG.SUPABASE_ANON_KEY||CFG.SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')){showLogin('Haiduc is not connected yet: add your Supabase URL and anon key to config.js.',true);$('loginForm').hidden=true;return}

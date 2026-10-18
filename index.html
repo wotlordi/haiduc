@@ -7,7 +7,13 @@
 <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png">
 <link rel="icon" type="image/png" sizes="64x64" href="img/favicon-64.png">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-<meta name="theme-color" content="#1d1f22">
+<meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17191b" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Haiduc">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -51,13 +57,14 @@
 
   <main class="main" id="main">
     <div class="bar">
-      <button class="btn menu-btn" id="menuBtn" aria-label="Open note list">☰</button>
+      <button class="btn back-btn" id="menuBtn" aria-label="Back to notes">‹ Notes</button>
       <div class="crumbs" id="crumbs">Haiduc</div>
       <div class="seg" id="modeSeg">
         <button id="mEdit" aria-pressed="false">Edit</button>
         <button id="mRead" aria-pressed="true">Read</button>
       </div>
       <button class="btn" id="linksBtn" hidden>Links</button>
+      <button class="btn save-btn" id="saveBtn" data-state="saved" disabled>Saved ✓</button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
     <div class="note" id="noteView"></div>
@@ -74,6 +81,11 @@
 
   <aside class="links" id="links"></aside>
 </div>
+<nav class="tabbar" id="tabbar" hidden aria-label="Sections">
+  <button id="tbNotes" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z M15 3v4h4 M9 12h7 M9 16h7"/></svg>Notes</button>
+  <button id="tbNew" class="tb-new" aria-label="New note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg></button>
+  <button id="tbTasks" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3v3H4z M4 15h3v3H4z M10 7.5h10 M10 16.5h10"/></svg>Tasks<span class="tb-count" id="tbCount"></span></button>
+</nav>
 <div class="toast" id="toast" hidden></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>

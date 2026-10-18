@@ -120,16 +120,67 @@ textarea.body:focus{outline:none}
 .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px;z-index:20}
 
 @media (max-width:1000px){.app{grid-template-columns:240px minmax(0,1fr)}.links{display:none}.app.show-links .links{display:block}}
+.back-btn,.tabbar{display:none}
 @media (max-width:720px){
-  .app,.app.tasks-mode{grid-template-columns:minmax(0,1fr)}
-  .side{position:fixed;inset:0 auto 0 0;width:min(300px,86vw);z-index:10;transform:translateX(-100%);transition:transform .2s;padding-top:env(safe-area-inset-top,0px)}
-  .app.drawer .side{transform:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.35)}
-  .menu-btn{display:inline-block}
-  .board{grid-template-columns:minmax(0,1fr)}
+  html,body{overscroll-behavior:none}
+  .app,.app.tasks-mode{grid-template-columns:minmax(0,1fr);height:calc(100% - 60px - env(safe-area-inset-bottom,0px))}
+  /* two screens: list or note */
+  .app.ph-list .main{display:none}
+  .app:not(.ph-list) .side{display:none}
+  .side{border-right:0;padding-top:env(safe-area-inset-top,0px)}
+  .side .nav{display:none}
+  .side .brand{padding:14px 16px 12px}
+  .brand-name{font-size:24px}
+  .search{padding:0 16px 10px}
+  .search .btn{display:none}
+  .list{padding:4px 10px 16px}
+  .list li button{padding:11px 12px}
+  .list .t{font-size:16px}
+  .account{padding-bottom:10px}
+  .bar{padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;gap:6px;flex-wrap:nowrap}
+  .bar .crumbs{display:none}
+  .back-btn{display:inline-block;border:0;background:none;color:var(--accent);font-weight:600;padding:6px 4px;font-size:16px;margin-right:auto}
+  .app.tasks-mode .back-btn{visibility:hidden}
+  .app.tasks-mode .bar::before{content:"Tasks";font-family:var(--display);font-weight:600;font-size:22px;margin-right:auto}
+  .app.tasks-mode .back-btn{display:none}
+  #linksBtn{display:none}
+  .seg button{padding:7px 12px}
+  .btn{padding:7px 11px}
+  .note{padding:18px 16px 40px}
   .title-in{font-size:27px}
-  .note{padding:20px 16px 60px}
-  .bar{padding:8px 16px}
+  .prose{font-size:17px}
+  .links-inline{margin-top:28px;padding-top:12px;border-top:1px solid var(--line)}
+  .links-inline .label{padding-left:0}
+  .links-inline ul{list-style:none;margin:0;padding:0 0 10px}
+  .links-inline li button{border:0;background:none;color:var(--accent);padding:6px 0;text-align:left;font-size:15px}
+  .links-inline .tk{color:var(--fg)}
+  .links-inline .x{color:var(--muted);font-size:13px;padding:0 0 6px}
+  .links-inline .none{color:var(--muted);font-size:14px;padding:0 0 10px}
+  .board-wrap{padding:14px 16px 24px}
+  .board{grid-template-columns:minmax(0,1fr)}
+  .add-task{gap:8px}
+  .add-task input[type=text]{flex-basis:100%}
+  .add-task input[type=date],.add-task select{flex:1 1 40%;min-width:0}
+  .add-task .btn{flex:1 1 100%;padding:10px}
+  .card .acts button{padding:5px 10px;font-size:13px}
+  /* 16px inputs stop iOS from zooming in */
+  input,select,textarea,.search input,.add-task input,.add-task select{font-size:16px}
+  textarea.body{font-size:16px}
+  /* bottom tab bar */
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--panel);border-top:1px solid var(--line);
+    padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px));justify-content:space-around;align-items:center;height:calc(60px + env(safe-area-inset-bottom,0px))}
+  .tabbar[hidden]{display:none!important}
+  .tabbar button{flex:1;border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted);position:relative;padding:4px 0}
+  .tabbar button[aria-pressed="true"]{color:var(--accent);font-weight:600}
+  .tabbar svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .tabbar .tb-new{flex:0 0 52px;height:44px;border-radius:12px;background:var(--accent);color:var(--bg)}
+  .tabbar .tb-new svg{width:26px;height:26px;stroke-width:2.2}
+  .tb-count{position:absolute;top:0;left:calc(50% + 8px);font-family:var(--mono);font-size:10px;background:var(--accent);color:var(--bg);border-radius:999px;padding:0 5px;line-height:15px}
+  .tb-count:empty{display:none}
+  .toast{bottom:calc(72px + env(safe-area-inset-bottom,0px))}
 }
+.prose ul:has(>li>input[type=checkbox]){padding-left:4px}
+.prose li:has(>input[type=checkbox]){margin-left:0}
 @media (prefers-reduced-motion:reduce){.side{transition:none}}
 
 /* login + account */
@@ -154,3 +205,8 @@ textarea.body:focus{outline:none}
 .brand-name{display:flex;align-items:center;gap:8px}
 .logo{width:30px;height:30px;flex-shrink:0;object-fit:contain}
 .login-card .logo{width:48px;height:48px}
+.save-btn[data-state="dirty"]{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+.save-btn[data-state="saved"]{color:var(--done);border-color:var(--line)}
+.save-btn[data-state="saving"]{color:var(--muted)}
+.save-btn[data-state="error"]{background:var(--warn);border-color:var(--warn);color:var(--bg);font-weight:600}
+.save-btn:disabled{cursor:default;opacity:1}
