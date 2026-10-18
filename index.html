@@ -50,6 +50,7 @@
       <input id="q" type="search" placeholder="Search notes" aria-label="Search notes">
       <button class="btn primary" id="newNote" title="New note">+ Note</button>
     </div>
+    <div class="tag-list" id="tagList" hidden></div>
     <div class="label" id="listLabel">All notes</div>
     <ul class="list" id="list"></ul>
     <div class="account"><span id="meEmail"></span><span class="acct-btns"><button id="setPass">Set password</button><button id="signOut">Sign out</button></span></div>
@@ -69,13 +70,16 @@
     </div>
     <div class="note" id="noteView"></div>
     <div class="board-wrap" id="taskView" hidden>
+      <div class="task-head"><div class="seg" id="tvSeg" role="group" aria-label="Task view"><button id="tvBoard" aria-pressed="true">Board</button><button id="tvGantt" aria-pressed="false">Timeline</button></div></div>
       <form class="add-task" id="taskForm">
         <input type="text" id="tTitle" placeholder="New task, e.g. Review level 12 layout" aria-label="Task title" required>
-        <input type="date" id="tDue" aria-label="Due date">
+        <label class="dl" for="tStart">Start<input type="date" id="tStart"></label>
+        <label class="dl" for="tDue">Due<input type="date" id="tDue"></label>
         <select id="tNote" aria-label="Linked note"><option value="">No linked note</option></select>
         <button class="btn primary" type="submit">Add task</button>
       </form>
       <div class="board" id="board"></div>
+      <div class="gantt" id="gantt" hidden></div>
     </div>
   </main>
 

@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const CFG=window.VAULT_CONFIG||{};
 const PH=window.matchMedia('(max-width:720px)');
-const S={unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
+const S={tv:(()=>{try{return localStorage.getItem('haiduc.tv')==='gantt'?'gantt':'board'}catch(e){return 'board'}})(),editDates:null,unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
 let sb=null, saveTimer=null, pendingSave=null, channel=null;
 const STATUS=[['todo','To do'],['doing','In progress'],['done','Done']];
 
@@ -16,8 +16,8 @@ function who(email){if(!email)return'';if(S.me&&email.toLowerCase()===S.me.toLow
 /* ---------- row mapping ---------- */
 const ms=v=>v?new Date(v).getTime():0;
 function fromNote(r){return{id:r.id,title:r.title,body:r.body||'',createdAt:ms(r.created_at),updatedAt:ms(r.updated_at),updatedBy:r.updated_by}}
-function fromTask(r){return{id:r.id,title:r.title,status:r.status||'todo',due:r.due||'',noteId:r.note_id||'',assignee:r.assignee||'',createdAt:ms(r.created_at),createdBy:r.created_by}}
-function toTask(t){return{id:t.id,title:t.title,status:t.status,due:t.due||null,note_id:t.noteId||null,assignee:t.assignee||null,created_at:new Date(t.createdAt||Date.now()).toISOString(),created_by:t.createdBy||null}}
+function fromTask(r){return{id:r.id,title:r.title,status:r.status||'todo',start:r.start_date||'',due:r.due||'',noteId:r.note_id||'',assignee:r.assignee||'',createdAt:ms(r.created_at),createdBy:r.created_by}}
+function toTask(t){const r={id:t.id,title:t.title,status:t.status,start_date:t.start||null,due:t.due||null,note_id:t.noteId||null,assignee:t.assignee||null,created_at:new Date(t.createdAt||Date.now()).toISOString(),created_by:t.createdBy||null};if(S.noStartCol)delete r.start_date;return r}
 
 /* ---------- lookups ---------- */
 function sortedNotes(){return [...S.notes.values()].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0))}
@@ -82,25 +82,50 @@ async function createNote(title){
   markDirty(note);flushSave();
   setTimeout(()=>{const ti=$('titleIn');if(ti&&!title){ti.focus();ti.select()}},30);
 }
-async function saveTask(t){S.tasks.set(t.id,t);renderBoard();renderCounts();renderLinks();await run(sb.from('tasks').upsert(toTask(t)),'task')}
+async function saveTask(t){
+  S.tasks.set(t.id,t);renderBoard();renderCounts();renderLinks();
+  let row=toTask(t),res=await sb.from('tasks').upsert(row);
+  if(res.error&&/start_date/.test(res.error.message||'')){S.noStartCol=true;delete row.start_date;res=await sb.from('tasks').upsert(row);
+    toast('Start dates can\'t be stored yet. Run the small database update in Supabase (SQL Editor).')}
+  if(res.error){console.error(res.error);toast('Could not save task. Check your connection.')}
+}
+/* ---------- dates ---------- */
+function todayISO(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
+function msISO(ms){const d=new Date(ms||Date.now());return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
+const d2n=s=>{const [y,m,d]=s.split('-').map(Number);return Math.round(Date.UTC(y,m-1,d)/864e5)};
+const n2d=n=>new Date(n*864e5).toISOString().slice(0,10);
+const fmtD=s=>s?new Date(s+'T00:00').toLocaleDateString(undefined,{day:'numeric',month:'short'}):'';
+function taskSpan(t){const s=t.start||(t.due&&msISO(t.createdAt)<=t.due?msISO(t.createdAt):t.due)||msISO(t.createdAt);const e=t.due&&t.due>=s?t.due:s;return{s:d2n(s),e:d2n(e),noStart:!t.start,noDue:!t.due}}
 
 /* ---------- rendering ---------- */
 function renderAll(){renderList();renderMain();renderLinks();renderCounts();setStatus()}
 function renderCounts(){const open=[...S.tasks.values()].filter(t=>t.status!=='done').length;$('tbCount').textContent=open?open:'';$('cNotes').textContent=S.notes.size;$('cTasks').textContent=[...S.tasks.values()].filter(t=>t.status!=='done').length}
 function renderList(){
   const ul=$('list');const q=S.q.trim().toLowerCase();
-  let notes=sortedNotes();if(q)notes=notes.filter(n=>(n.title||'').toLowerCase().includes(q)||(n.body||'').toLowerCase().includes(q));
+  const tl=$('tagList');if(tl){const tags=allTags();tl.innerHTML=tags.map(([t,c])=>`<button class="tag${q==='#'+t?' on':''}" data-tag="${esc(t)}">#${esc(t)} <span>${c}</span></button>`).join('');tl.hidden=!tags.length}
+  let notes=sortedNotes();if(q.startsWith('#')&&q.length>1){const t=q.slice(1);notes=notes.filter(n=>tagsIn(n.body).has(t))}else if(q)notes=notes.filter(n=>(n.title||'').toLowerCase().includes(q)||(n.body||'').toLowerCase().includes(q));
   $('listLabel').textContent=q?`${notes.length} match${notes.length===1?'':'es'}`:'All notes';
   if(!notes.length){ul.innerHTML=`<li class="empty">${q?'No notes match that search.':(S.live?'No notes yet. Press + Note to start.':'Loading notes…')}</li>`;return}
   ul.innerHTML=notes.map(n=>{
     const m=ago(n.updatedAt)+(n.updatedBy&&who(n.updatedBy)!=='you'?' · '+who(n.updatedBy):'');
     return `<li><button data-id="${esc(n.id)}" aria-current="${S.view==='notes'&&n.id===S.cur}"><span class="t">${esc(n.title||'Untitled')}</span><span class="m">${esc(m)}</span></button></li>`}).join('');
 }
+/* #tags (Obsidian style): ignored inside code blocks and `inline code`; '# Heading' (with a space) stays a heading */
+const TAG_RE=/(^|[\s(\[,;])#([\p{L}_][\p{L}\p{N}_\/-]*)#?(?=$|[\s.,;:!?)\]])/gu;
+function mapOutsideCode(src,fn){let fence=false;return (src||'').split('\n').map(line=>{
+  if(/^\s*(```|~~~)/.test(line)){fence=!fence;return line}
+  if(fence)return line;
+  return line.split(/(`[^`]*`)/).map((part,i)=>i%2?part:fn(part)).join('');
+}).join('\n')}
+function tagsIn(body){const out=new Set();mapOutsideCode(body,t=>{t.replace(TAG_RE,(m,pre,tag)=>{out.add(tag.toLowerCase());return m});return t});return out}
+function allTags(){const c=new Map();S.notes.forEach(n=>tagsIn(n.body).forEach(t=>c.set(t,(c.get(t)||0)+1)));return [...c].sort((x,y)=>y[1]-x[1]||x[0].localeCompare(y[0]))}
+function showTag(tag){if(S.unsaved.size)flushSave();S.q='#'+tag;$('q').value=S.q;S.view='notes';S.phList=true;renderAll()}
 function renderMarkdown(src){
+  src=mapOutsideCode(src,t=>t.replace(TAG_RE,(m,pre,tag)=>`${pre}<a class="tag" data-tag="${esc(tag.toLowerCase())}">#${esc(tag)}</a>`));
   const withLinks=(src||'').replace(/\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]/g,(m,t,alias)=>{
     t=t.trim();const ex=byTitle(t);return `<a class="wl${ex?'':' missing'}" data-note="${esc(t)}">${esc((alias||t).trim())}</a>`});
   const html=marked.parse(withLinks,{gfm:true,breaks:true});
-  return DOMPurify.sanitize(html,{ADD_ATTR:['data-note']}).replace(/==([^=\n]+)==/g,'<mark>$1</mark>');
+  return DOMPurify.sanitize(html,{ADD_ATTR:['data-note','data-tag']}).replace(/==([^=\n]+)==/g,'<mark>$1</mark>');
 }
 function renderMain(){
   const phone=PH.matches;
@@ -128,17 +153,54 @@ function renderMain(){
     if($('bodyIn')&&v.dataset.id===n.id){$('metaLine').innerHTML=meta;return}
     v.dataset.id=n.id;
     v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta" id="metaLine">${meta}</div>
-    <textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…">${esc(n.body)}</textarea>
-    <div class="hint"><code>[[Other note]]</code> link · <code># Heading</code> · <code>- [ ] to-do</code> · <code>**bold**</code> · <code>==highlight==</code></div></div>`;
+    <div class="fmt" id="fmtBar" role="toolbar" aria-label="Formatting">
+      <button type="button" data-f="h1" title="Heading 1">H1</button><button type="button" data-f="h2" title="Heading 2">H2</button><button type="button" data-f="h3" title="Heading 3">H3</button>
+      <button type="button" data-f="b" title="Bold"><b>B</b></button><button type="button" data-f="i" title="Italic"><i>I</i></button>
+      <button type="button" data-f="ul" title="List">• List</button><button type="button" data-f="todo" title="To-do">☐ To-do</button>
+      <button type="button" data-f="link" title="Link to note">[[ ]]</button><button type="button" data-f="tag" title="Tag">#</button>
+    </div>
+    <div class="editor"><pre class="hl" id="bodyHl" aria-hidden="true"></pre><textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…" spellcheck="true">${esc(n.body)}</textarea></div>
+    <div class="hint"><code>[[Other note]]</code> link · <code>#tag</code> · <code># Heading</code> · <code>- [ ] to-do</code> · <code>**bold**</code> · <code>==highlight==</code></div></div>`;
     $('titleIn').oninput=e=>{n.title=e.target.value;$('crumbs').textContent='Notes / '+(n.title||'Untitled');scheduleSave()};
-    $('bodyIn').oninput=e=>{n.body=e.target.value;autosize(e.target);scheduleSave()};
-    autosize($('bodyIn'));
+    $('bodyIn').oninput=e=>{n.body=e.target.value;paintHl();autosize(e.target);scheduleSave()};
+    $('fmtBar').onmousedown=e=>e.preventDefault();
+    $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
+    paintHl();autosize($('bodyIn'));
   }else{
     v.dataset.id='';
     v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta">${meta}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
     if(PH.matches)v.querySelector('.note-inner').insertAdjacentHTML('beforeend','<section class="links-inline" id="linksInline"></section>');
     v.querySelectorAll('#prose input[type=checkbox]').forEach((cb,i)=>{cb.disabled=false;cb.onchange=()=>toggleCheck(n,i)});
   }
+}
+/* Edit-mode formatting: a colored copy of the text sits behind the transparent textarea.
+   Only color and weight change (monospace bold keeps the same width), so the cursor stays aligned. */
+function hlLine(line){
+  const h=line.match(/^( {0,3})(#{1,6})(\s.*|$)/);
+  if(h)return `<span class="hh hh${h[2].length}">${esc(line)}</span>`;
+  let s=esc(line);
+  s=s.replace(/\[\[[^\[\]]+\]\]/g,m=>`<span class="hk">${m}</span>`)
+     .replace(/\*\*[^*]+\*\*/g,m=>`<span class="hb">${m}</span>`)
+     .replace(/==[^=]+==/g,m=>`<span class="hm">${m}</span>`)
+     .replace(/(^|[\s(\[,;])(#[\p{L}_][\p{L}\p{N}_\/-]*)/gu,(m,p,t)=>`${p}<span class="ht">${t}</span>`)
+     .replace(/^(\s*)([-*+]|\d+\.)(\s+\[[ xX]\])?(?=\s)/,(m,sp,b,c)=>`${sp}<span class="hl-b">${b}${c||''}</span>`);
+  return s;
+}
+function paintHl(){const ta=$('bodyIn'),hl=$('bodyHl');if(!ta||!hl)return;let fence=false;
+  hl.innerHTML=ta.value.split('\n').map(l=>{if(/^\s*(```|~~~)/.test(l)){fence=!fence;return `<span class="hc">${esc(l)}</span>`}return fence?`<span class="hc">${esc(l)}</span>`:hlLine(l)}).join('\n')+'\n ';}
+function applyFmt(f){
+  const ta=$('bodyIn');if(!ta)return;const v=ta.value;let s=ta.selectionStart,e=ta.selectionEnd;
+  const ls=v.lastIndexOf('\n',s-1)+1;let le=v.indexOf('\n',e);if(le<0)le=v.length;
+  const set=(text,from,to,ns,ne)=>{ta.focus();ta.setSelectionRange(from,to);if(!document.execCommand('insertText',false,text)){ta.setRangeText(text,from,to,'end')}ta.setSelectionRange(ns,ne);ta.dispatchEvent(new Event('input'))};
+  const lineFx=fn=>{const lines=v.slice(ls,le).split('\n').map(fn).join('\n');set(lines,ls,le,ls+lines.length,ls+lines.length)};
+  const heading=n=>lineFx(l=>{const m=l.match(/^ {0,3}(#{1,6})\s+/);const rest=m?l.slice(m[0].length):l;return m&&m[1].length===n?rest:'#'.repeat(n)+' '+rest});
+  const prefix=p=>lineFx(l=>l.startsWith(p)?l.slice(p.length):p+l.replace(/^([-*+]\s+(\[[ xX]\]\s+)?)/,''));
+  const wrap=(o,c,ph)=>{const sel=v.slice(s,e)||ph;set(o+sel+c,s,e,s+o.length,s+o.length+sel.length)};
+  if(f==='h1')heading(1);else if(f==='h2')heading(2);else if(f==='h3')heading(3);
+  else if(f==='b')wrap('**','**','bold text');else if(f==='i')wrap('*','*','italic text');
+  else if(f==='ul')prefix('- ');else if(f==='todo')prefix('- [ ] ');
+  else if(f==='link')wrap('[[',']]','Note name');
+  else if(f==='tag'){const sel=v.slice(s,e).replace(/\s+/g,'-')||'tag';set('#'+sel,s,e,s+1,s+1+sel.length)}
 }
 function autosize(t){t.style.height='auto';t.style.height=Math.max(t.scrollHeight,window.innerHeight*.6)+'px'}
 function toggleCheck(n,idx){let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});markDirty(n);flushSave()}
@@ -156,7 +218,8 @@ function renderLinks(){
 function renderBoard(){
   const sel=$('tNote');const cur=sel.value;
   sel.innerHTML='<option value="">No linked note</option>'+sortedNotes().map(n=>`<option value="${esc(n.id)}">${esc(n.title)}</option>`).join('');sel.value=cur;
-  const today=new Date().toISOString().slice(0,10);
+  if(S.tv==='gantt'){renderGantt();return}
+  const today=todayISO();
   const all=[...S.tasks.values()].sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')||(a.createdAt||0)-(b.createdAt||0));
   $('board').innerHTML=STATUS.map(([s,label],idx)=>{
     const items=all.filter(t=>(t.status||'todo')===s);
@@ -164,26 +227,86 @@ function renderBoard(){
       const note=t.noteId&&S.notes.get(t.noteId);const late=t.due&&t.due<today&&s!=='done';
       const mine=t.assignee&&S.me&&t.assignee.toLowerCase()===S.me.toLowerCase();
       return `<article class="card" draggable="true" data-id="${esc(t.id)}"><div class="tt">${esc(t.title)}</div>
-      <div class="row">${t.due?`<span class="chip${late?' late':''}">${late?'overdue · ':''}${esc(new Date(t.due+'T00:00').toLocaleDateString(undefined,{day:'numeric',month:'short'}))}</span>`:''}${note?`<span class="chip note-link" data-open="${esc(note.id)}">${esc(note.title)}</span>`:''}${t.assignee?`<span class="chip" title="Assigned to ${esc(t.assignee)}">@${esc(who(t.assignee))}</span>`:''}</div>
+      ${S.editDates===t.id?`<div class="date-edit"><label>Start<input type="date" data-dfield="start" value="${esc(t.start||'')}"></label><label>Due<input type="date" data-dfield="due" value="${esc(t.due||'')}"></label><button data-dates-done="1">Done</button></div>`:''}
+      <div class="row"><button class="chip date-chip${late?' late':''}" data-edit-dates="1" title="Change dates">${late?'overdue · ':''}${t.start&&t.due?`${esc(fmtD(t.start))} → ${esc(fmtD(t.due))}`:t.due?`due ${esc(fmtD(t.due))}`:t.start?`from ${esc(fmtD(t.start))}`:'+ Dates'}</button>${note?`<span class="chip note-link" data-open="${esc(note.id)}">${esc(note.title)}</span>`:''}${t.assignee?`<span class="chip" title="Assigned to ${esc(t.assignee)}">@${esc(who(t.assignee))}</span>`:''}</div>
       <div class="acts">${idx>0?`<button data-move="${STATUS[idx-1][0]}" aria-label="Move back">←</button>`:''}${idx<2?`<button data-move="${STATUS[idx+1][0]}" aria-label="Move forward">→</button>`:''}<button data-assign="1">${mine?'Unassign':'Take it'}</button><button data-del="1" aria-label="Delete task">✕</button></div></article>`}).join(''):'<div class="none">Nothing here.</div>'}</section>`}).join('');
 }
+
+/* ---------- timeline (Gantt) ---------- */
+const STAT_LABEL={todo:'To do',doing:'In progress',done:'Done'};
+function renderGantt(){
+  const g=$('gantt');const list=[...S.tasks.values()].map(t=>({t,...taskSpan(t)})).sort((x,y)=>x.s-y.s||x.e-y.e);
+  if(!list.length){g.innerHTML='<div class="none g-empty">No tasks yet. Add one above with a start and due date to see it on the timeline.</div>';return}
+  const DW=PH.matches?24:30,tn=d2n(todayISO());
+  let lo=Math.min(tn,...list.map(x=>x.s))-3,hi=Math.max(tn,...list.map(x=>x.e))+10;
+  lo-=((new Date(lo*864e5).getUTCDay()+6)%7);if(hi-lo<35)hi=lo+35;
+  const days=[];for(let n=lo;n<=hi;n++)days.push(n);const W=days.length*DW;
+  const months=[];days.forEach((n,i)=>{const d=new Date(n*864e5);if(i===0||d.getUTCDate()===1)months.push({i,label:d.toLocaleDateString(undefined,{month:'long',year:'numeric',timeZone:'UTC'})})});
+  const bg=days.map((n,i)=>{const wd=new Date(n*864e5).getUTCDay();return wd===0||wd===6?`<div class="g-we" style="left:${i*DW}px;width:${DW}px"></div>`:''}).join('');
+  const todayX=(tn-lo)*DW;
+  g.innerHTML=`<div class="g-legend"><span class="g-k s-todo"></span>To do<span class="g-k s-doing"></span>In progress<span class="g-k s-done"></span>Done<span class="g-hint">Drag a bar to move it, drag its edges to change start or due.</span></div>
+  <div class="g-scroll" id="gScroll"><div class="g-table" style="--dw:${DW}px;width:calc(var(--gn) + ${W}px)">
+    <div class="g-row g-head"><div class="g-name g-corner">Task</div><div class="g-track" style="width:${W}px">
+      ${months.map((m,k)=>`<div class="g-month" style="left:${m.i*DW}px;width:${((months[k+1]?months[k+1].i:days.length)-m.i)*DW}px">${esc(m.label)}</div>`).join('')}
+      ${days.map((n,i)=>{const d=new Date(n*864e5);return `<div class="g-day${n===tn?' today':''}" style="left:${i*DW}px;width:${DW}px"><span>${'MTWTFSS'[(d.getUTCDay()+6)%7]}</span>${d.getUTCDate()}</div>`}).join('')}
+    </div></div>
+    ${list.map(({t,s,e,noStart,noDue})=>{const late=t.due&&t.due<todayISO()&&t.status!=='done';
+      return `<div class="g-row"><div class="g-name" title="${esc(t.title)}"><span class="g-dot s-${t.status}"></span><span class="g-tt">${esc(t.title)}</span></div>
+      <div class="g-track" style="width:${W}px">${bg}<div class="g-today" style="left:${todayX+DW/2}px"></div>
+        <div class="g-bar s-${t.status}${late?' late':''}${(e-s+1)*DW<100?' short':''}${noDue?' nodue':''}${noStart?' nostart':''}" data-id="${esc(t.id)}" style="left:${(s-lo)*DW+2}px;width:${(e-s+1)*DW-4}px" title="${esc(t.title)}: ${esc(fmtD(n2d(s)))} → ${noDue?'no due date':esc(fmtD(t.due))} · ${STAT_LABEL[t.status]}">
+          <span class="g-h l"></span><span class="g-lbl">${esc(t.title)}</span><span class="g-h r"></span></div></div></div>`}).join('')}
+  </div></div>`;
+  g.dataset.lo=lo;g.dataset.dw=DW;
+  const sc=$('gScroll');if(!S.gScrolled){S.gScrolled=true;sc.scrollLeft=Math.max(0,todayX-DW*5)}else if(S.gScrollX!=null)sc.scrollLeft=S.gScrollX;
+  sc.onscroll=()=>{S.gScrollX=sc.scrollLeft};
+}
+let gDrag=null;
+$('gantt').addEventListener('pointerdown',e=>{
+  const bar=e.target.closest('.g-bar');if(!bar||e.button>0)return;const t=S.tasks.get(bar.dataset.id);if(!t)return;
+  const sp=taskSpan(t);const mode=e.target.classList.contains('l')?'l':e.target.classList.contains('r')?'r':'m';
+  gDrag={t,mode,x0:e.clientX,s0:sp.s,e0:sp.e,s:sp.s,e:sp.e,bar,moved:false,lo:+$('gantt').dataset.lo,dw:+$('gantt').dataset.dw};
+  bar.setPointerCapture(e.pointerId);bar.classList.add('drag');e.preventDefault();
+});
+$('gantt').addEventListener('pointermove',e=>{
+  if(!gDrag)return;const d=Math.round((e.clientX-gDrag.x0)/gDrag.dw);const G=gDrag;
+  if(G.mode==='l'){G.s=Math.min(G.s0+d,G.e0);G.e=G.e0}else if(G.mode==='r'){G.e=Math.max(G.e0+d,G.s0);G.s=G.s0}else{G.s=G.s0+d;G.e=G.e0+d}
+  if(d!==0)G.moved=true;
+  G.bar.style.left=((G.s-G.lo)*G.dw+2)+'px';G.bar.style.width=((G.e-G.s+1)*G.dw-4)+'px';
+  G.bar.querySelector('.g-lbl').textContent=fmtD(n2d(G.s))+' → '+fmtD(n2d(G.e));
+});
+async function gEnd(){if(!gDrag)return;const G=gDrag;gDrag=null;G.bar.classList.remove('drag');
+  if(!G.moved){G.bar.querySelector('.g-lbl').textContent=G.t.title;return}
+  const u={...G.t,start:n2d(G.s)};if(G.mode!=='l'||G.t.due)u.due=n2d(G.e);
+  await saveTask(u);toast(`${G.t.title}: ${fmtD(u.start)} → ${u.due?fmtD(u.due):'no due date'}`)}
+$('gantt').addEventListener('pointerup',gEnd);$('gantt').addEventListener('pointercancel',gEnd);
+function setTv(v){S.tv=v;lsSet('haiduc.tv',v);$('tvBoard').setAttribute('aria-pressed',v==='board');$('tvGantt').setAttribute('aria-pressed',v==='gantt');$('board').hidden=v==='gantt';$('gantt').hidden=v!=='gantt';renderBoard()}
+$('tvBoard').onclick=()=>setTv('board');$('tvGantt').onclick=()=>setTv('gantt');
 
 /* ---------- events ---------- */
 $('taskForm').addEventListener('submit',async e=>{
   e.preventDefault();const title=$('tTitle').value.trim();if(!title)return;
-  const t={id:newId('t'),title,status:'todo',due:$('tDue').value||'',noteId:$('tNote').value||'',assignee:'',createdAt:Date.now(),createdBy:S.me};
-  $('tTitle').value='';$('tDue').value='';await saveTask(t);toast('Task added');
+  let st=$('tStart').value||'',du=$('tDue').value||'';if(st&&du&&du<st)du=st;
+  const t={id:newId('t'),title,status:'todo',start:st,due:du,noteId:$('tNote').value||'',assignee:'',createdAt:Date.now(),createdBy:S.me};
+  $('tTitle').value='';$('tDue').value='';$('tStart').value=todayISO();await saveTask(t);toast('Task added');
 });
 $('board').addEventListener('click',async e=>{
   const o=e.target.closest('[data-open]');if(o){open(o.dataset.open,'read');return}
   const card=e.target.closest('.card');if(!card)return;const t=S.tasks.get(card.dataset.id);if(!t)return;
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.editDates){S.editDates=S.editDates===t.id?null:t.id;renderBoard();return}
+  if(b.dataset.datesDone){S.editDates=null;renderBoard();return}
   if(b.dataset.move)await saveTask({...t,status:b.dataset.move});
   else if(b.dataset.assign){const mine=t.assignee&&t.assignee.toLowerCase()===S.me.toLowerCase();await saveTask({...t,assignee:mine?'':S.me})}
   else if(b.dataset.del){
     if(b.dataset.arm){S.tasks.delete(t.id);renderBoard();renderCounts();await run(sb.from('tasks').delete().eq('id',t.id),'task')}
     else{b.dataset.arm='1';b.textContent='Delete?';b.style.color='var(--warn)';setTimeout(()=>{if(b.isConnected){delete b.dataset.arm;b.textContent='✕';b.style.color=''}},3000)}
   }
+});
+$('board').addEventListener('change',async e=>{
+  const inp=e.target.closest('[data-dfield]');if(!inp)return;const card=inp.closest('.card');const t=card&&S.tasks.get(card.dataset.id);if(!t)return;
+  const u={...t,[inp.dataset.dfield]:inp.value||''};
+  if(u.start&&u.due&&u.due<u.start){if(inp.dataset.dfield==='start')u.due=u.start;else u.start=u.due;toast('Due date can\'t be before the start date, so I adjusted it.')}
+  await saveTask(u);
 });
 let dragId=null;
 $('board').addEventListener('dragstart',e=>{const c=e.target.closest('.card');if(c){dragId=c.dataset.id;e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',dragId)}catch(_){}}});
@@ -202,6 +325,7 @@ $('links').addEventListener('click',e=>{
 $('noteView').addEventListener('click',e=>{
   const lb=e.target.closest('#linksInline button');
   if(lb){if(lb.dataset.open)open(lb.dataset.open,'read');else if(lb.dataset.title){const ex=byTitle(lb.dataset.title);ex?open(ex.id,'read'):createNote(lb.dataset.title)}else if(lb.dataset.tasks){S.view='tasks';renderAll()}return}
+  const tg=e.target.closest('a.tag');if(tg){e.preventDefault();showTag(tg.dataset.tag);return}
   const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
 $('navNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
 $('navTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
@@ -210,6 +334,7 @@ $('mRead').onclick=()=>{if(S.unsaved.size)flushSave();S.mode='read';renderMain()
 $('newNote').onclick=()=>createNote();
 $('saveBtn').onclick=()=>{const n=S.notes.get(S.cur);if(n&&!S.unsaved.size)return;flushSave()};
 $('q').oninput=e=>{S.q=e.target.value;renderList()};
+$('tagList').addEventListener('click',e=>{const b=e.target.closest('[data-tag]');if(!b)return;const t=b.dataset.tag;if(S.q==='#'+t){S.q='';$('q').value='';renderList()}else showTag(t)});
 $('menuBtn').onclick=()=>{if(S.unsaved.size)flushSave();S.phList=true;S.mode='read';renderAll()};
 $('tbNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';S.phList=true;renderAll()};
 $('tbTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';renderAll()};
@@ -328,6 +453,7 @@ $('setPass').onclick=async()=>{
 $('signOut').onclick=async()=>{if(S.unsaved.size)await flushSave();if(channel)sb.removeChannel(channel);await sb.auth.signOut();S.notes.clear();S.tasks.clear();S.live=false;showLogin()};
 
 function boot(){
+  $('tStart').value=todayISO();setTimeout(()=>setTv(S.tv),0);
   if(!CFG.SUPABASE_URL||!CFG.SUPABASE_ANON_KEY||CFG.SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')){showLogin('Haiduc is not connected yet: add your Supabase URL and anon key to config.js.',true);$('loginForm').hidden=true;return}
   sb=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_ANON_KEY);
   let entered=false;
