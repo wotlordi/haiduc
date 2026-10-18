@@ -202,7 +202,8 @@ function applyFmt(f){
   else if(f==='link')wrap('[[',']]','Note name');
   else if(f==='tag'){const sel=v.slice(s,e).replace(/\s+/g,'-')||'tag';set('#'+sel,s,e,s+1,s+1+sel.length)}
 }
-function autosize(t){t.style.height='auto';t.style.height=Math.max(t.scrollHeight,window.innerHeight*.6)+'px'}
+function autosize(t){if(t){t.style.height='';t.scrollTop=0}}
+document.addEventListener('scroll',e=>{if(e.target&&e.target.id==='bodyIn')e.target.scrollTop=0},true);
 function toggleCheck(n,idx){let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});markDirty(n);flushSave()}
 function renderLinks(){
   const L=$('links');const n=S.notes.get(S.cur);

@@ -64,8 +64,8 @@ button{cursor:pointer}
 textarea.body{width:100%;min-height:60vh;border:0;background:transparent;resize:none;font-family:var(--mono);font-size:14px;line-height:1.7;padding:0}
 .editor{position:relative}
 .editor textarea.body,.editor .hl{font-family:var(--mono);font-size:14px;line-height:1.7;letter-spacing:0;padding:0;margin:0;border:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;tab-size:4}
-.editor .hl{position:absolute;inset:0;pointer-events:none;color:var(--fg);overflow:hidden}
-.editor textarea.body{position:relative;color:transparent;caret-color:var(--fg);-webkit-text-fill-color:transparent}
+.editor .hl{position:relative;display:block;min-height:60vh;pointer-events:none;color:var(--fg);overflow:visible;visibility:visible}
+.editor textarea.body{position:absolute;inset:0;width:100%;height:100%!important;min-height:0;overflow:hidden;color:transparent;caret-color:var(--fg);-webkit-text-fill-color:transparent}
 .editor textarea.body::placeholder{color:var(--muted);-webkit-text-fill-color:var(--muted)}
 .editor textarea.body::selection{background:color-mix(in srgb,var(--accent) 30%,transparent);-webkit-text-fill-color:transparent}
 .hh{font-weight:700;color:var(--accent)}
@@ -76,7 +76,7 @@ textarea.body{width:100%;min-height:60vh;border:0;background:transparent;resize:
 .hm{background:var(--mark)}
 .hl-b{color:var(--accent);font-weight:700}
 .hc{color:var(--muted)}
-.fmt{display:flex;flex-wrap:wrap;gap:4px;position:sticky;top:0;z-index:2;background:var(--surface);padding:6px 0;border-bottom:1px solid var(--line)}
+.fmt{display:flex;flex-wrap:wrap;gap:4px;position:sticky;top:-28px;z-index:2;background:var(--surface);padding:6px 0;border-bottom:1px solid var(--line)}
 .fmt button{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:4px 9px;font-size:13px;min-width:34px}
 .fmt button:hover{border-color:var(--accent);color:var(--accent)}
 textarea.body:focus{outline:none}
@@ -183,7 +183,7 @@ textarea.body:focus{outline:none}
   /* 16px inputs stop iOS from zooming in */
   input,select,textarea,.search input,.add-task input,.add-task select{font-size:16px}
   textarea.body,.editor .hl,.editor textarea.body{font-size:16px}
-  .fmt{overflow-x:auto;flex-wrap:nowrap}
+  .fmt{overflow-x:auto;flex-wrap:nowrap;top:-18px}
   .fmt button{flex:0 0 auto;padding:6px 10px}
   /* bottom tab bar */
   .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--panel);border-top:1px solid var(--line);
