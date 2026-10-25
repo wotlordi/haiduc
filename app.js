@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const CFG=window.VAULT_CONFIG||{};
 const PH=window.matchMedia('(max-width:720px)');
-const S={tv:(()=>{try{return localStorage.getItem('haiduc.tv')==='gantt'?'gantt':'board'}catch(e){return 'board'}})(),editDates:null,unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
+const S={hist:null,tv:(()=>{try{return localStorage.getItem('haiduc.tv')==='gantt'?'gantt':'board'}catch(e){return 'board'}})(),editDates:null,unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
 let sb=null, saveTimer=null, pendingSave=null, channel=null;
 const STATUS=[['todo','To do'],['doing','In progress'],['done','Done']];
 
@@ -66,7 +66,7 @@ async function flushSave(){
 }
 function setSaveState(st){
   saveState=st;const b=$('saveBtn');
-  if(b){b.dataset.state=st;b.textContent={dirty:'Save',saving:'Saving…',saved:'Saved ✓',error:'Not saved · Retry'}[st];b.disabled=st==='saving'||st==='saved'}
+  if(b){b.dataset.state=st;const L={dirty:['Save','Save'],saving:['Saving…','…'],saved:['Saved ✓','✓'],error:['Not saved · Retry','Retry']}[st];b.innerHTML=`<span class="sv-l">${L[0]}</span><span class="sv-s">${L[1]}</span>`;b.title=L[0];b.disabled=st==='saving'||st==='saved'}
   setStatus();
 }
 function setStatus(){const s=$('status');
@@ -129,28 +129,35 @@ function renderMarkdown(src){
 }
 function renderMain(){
   const phone=PH.matches;
-  $('app').classList.toggle('ph-list',phone&&S.view==='notes'&&(S.phList||!S.notes.get(S.cur)));
+  $('app').classList.toggle('ph-list',phone&&S.view==='notes'&&(S.phList||(!S.notes.get(S.cur)&&!(S.hist&&S.hist.noteId==='__deleted'))));
   $('tabbar').hidden=!phone||$('app').hidden;
   $('tbNotes').setAttribute('aria-pressed',S.view==='notes');$('tbTasks').setAttribute('aria-pressed',S.view==='tasks');
   $('app').classList.toggle('tasks-mode',S.view==='tasks');
   $('navNotes').setAttribute('aria-pressed',S.view==='notes');$('navTasks').setAttribute('aria-pressed',S.view==='tasks');
   $('noteView').hidden=S.view!=='notes';$('taskView').hidden=S.view!=='tasks';
   const n=S.notes.get(S.cur);
-  $('modeSeg').hidden=S.view!=='notes'||!n;$('delBtn').hidden=S.view!=='notes'||!n;$('saveBtn').hidden=S.view!=='notes'||!n;setSaveState(saveState);$('linksBtn').hidden=S.view!=='notes'||!n;
+  $('modeSeg').hidden=S.view!=='notes'||!n;$('delBtn').hidden=S.view!=='notes'||!n;$('histBtn').hidden=S.view!=='notes'||!n;$('histBtn').setAttribute('aria-pressed',!!(S.hist&&n&&S.hist.noteId===n.id));$('saveBtn').hidden=S.view!=='notes'||!n;setSaveState(saveState);$('linksBtn').hidden=S.view!=='notes'||!n;
   $('delBtn').classList.remove('arm');$('delBtn').textContent='Delete';
   if(S.view==='tasks'){$('crumbs').textContent='Tasks';renderBoard();return}
   $('mEdit').setAttribute('aria-pressed',S.mode==='edit');$('mRead').setAttribute('aria-pressed',S.mode==='read');
   const v=$('noteView');
+  if(S.view==='notes'&&S.hist&&S.hist.noteId==='__deleted'){renderHistory();return}
   if(!n){
     $('crumbs').textContent='Haiduc';v.dataset.id='';
     if(!S.live){v.innerHTML='<div class="blank"><p>Loading Haiduc…</p></div>';return}
     v.innerHTML=`<div class="blank"><h2>${S.notes.size?'Pick a note':'No notes yet'}</h2><p>Notes are written in Markdown. Link notes together with <code>[[Note name]]</code>, and switch to Tasks to track work on a board.</p><button class="btn primary" id="blankNew">Create a note</button></div>`;
     $('blankNew').onclick=()=>createNote();return;
   }
+  if(S.hist&&S.hist.noteId===n.id){renderHistory();return}
   $('crumbs').textContent='Notes / '+(n.title||'Untitled');
   const meta=n.updatedAt?`Edited ${ago(n.updatedAt)}${n.updatedBy?' by '+esc(who(n.updatedBy)):''}`:'';
   if(S.mode==='edit'){
-    if($('bodyIn')&&v.dataset.id===n.id){$('metaLine').innerHTML=meta;return}
+    if($('bodyIn')&&v.dataset.id===n.id){
+      $('metaLine').innerHTML=meta;
+      if(!S.unsaved.has(n.id)){const ta=$('bodyIn'),ti=$('titleIn');
+        if(ta.value!==n.body){const pos=Math.min(ta.selectionStart,n.body.length);ta.value=n.body;ta.setSelectionRange(pos,pos);paintHl()}
+        if(ti.value!==n.title&&document.activeElement!==ti)ti.value=n.title}
+      return}
     v.dataset.id=n.id;
     v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta" id="metaLine">${meta}</div>
     <div class="fmt" id="fmtBar" role="toolbar" aria-label="Formatting">
@@ -161,8 +168,9 @@ function renderMain(){
     </div>
     <div class="editor"><pre class="hl" id="bodyHl" aria-hidden="true"></pre><textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…" spellcheck="true">${esc(n.body)}</textarea></div>
     <div class="hint"><code>[[Other note]]</code> link · <code>#tag</code> · <code># Heading</code> · <code>- [ ] to-do</code> · <code>**bold**</code> · <code>==highlight==</code></div></div>`;
-    $('titleIn').oninput=e=>{n.title=e.target.value;$('crumbs').textContent='Notes / '+(n.title||'Untitled');scheduleSave()};
-    $('bodyIn').oninput=e=>{n.body=e.target.value;paintHl();autosize(e.target);scheduleSave()};
+    const eid=n.id;
+    $('titleIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.title=e.target.value;$('crumbs').textContent='Notes / '+(cur.title||'Untitled');markDirty(cur)};
+    $('bodyIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.body=e.target.value;paintHl();autosize(e.target);markDirty(cur)};
     $('fmtBar').onmousedown=e=>e.preventDefault();
     $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
     paintHl();autosize($('bodyIn'));
@@ -204,7 +212,7 @@ function applyFmt(f){
 }
 function autosize(t){if(t){t.style.height='';t.scrollTop=0}}
 document.addEventListener('scroll',e=>{if(e.target&&e.target.id==='bodyIn')e.target.scrollTop=0},true);
-function toggleCheck(n,idx){let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});markDirty(n);flushSave()}
+function toggleCheck(n,idx){n=S.notes.get(n.id)||n;let i=-1;n.body=n.body.replace(/^(\s*(?:[-*+]|\d+\.)\s+)\[( |x|X)\]/gm,(m,p,c)=>{i++;return i===idx?p+(c===' '?'[x]':'[ ]'):m});markDirty(n);flushSave()}
 function renderLinks(){
   const L=$('links');const n=S.notes.get(S.cur);
   if(!n||S.view!=='notes'){L.innerHTML='<div class="label">Links</div><div class="none">Open a note to see what links to it.</div>';return}
@@ -232,6 +240,58 @@ function renderBoard(){
       <div class="row"><button class="chip date-chip${late?' late':''}" data-edit-dates="1" title="Change dates">${late?'overdue · ':''}${t.start&&t.due?`${esc(fmtD(t.start))} → ${esc(fmtD(t.due))}`:t.due?`due ${esc(fmtD(t.due))}`:t.start?`from ${esc(fmtD(t.start))}`:'+ Dates'}</button>${note?`<span class="chip note-link" data-open="${esc(note.id)}">${esc(note.title)}</span>`:''}${t.assignee?`<span class="chip" title="Assigned to ${esc(t.assignee)}">@${esc(who(t.assignee))}</span>`:''}</div>
       <div class="acts">${idx>0?`<button data-move="${STATUS[idx-1][0]}" aria-label="Move back">←</button>`:''}${idx<2?`<button data-move="${STATUS[idx+1][0]}" aria-label="Move forward">→</button>`:''}<button data-assign="1">${mine?'Unassign':'Take it'}</button><button data-del="1" aria-label="Delete task">✕</button></div></article>`}).join(''):'<div class="none">Nothing here.</div>'}</section>`}).join('');
 }
+
+/* ---------- history: earlier versions kept by the database ---------- */
+const fmtWhen=iso=>new Date(iso).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+async function openHistory(noteId){
+  if(S.unsaved.size)await flushSave();
+  S.hist={noteId,list:null,sel:null,err:null};S.view='notes';
+  if(noteId==='__deleted'){S.cur='__deleted';S.phList=false}
+  renderAll();
+  let q=sb.from('note_versions').select('id,note_id,title,body,saved_at,saved_by,reason').order('saved_at',{ascending:false}).limit(100);
+  q=noteId==='__deleted'?q.eq('reason','deleted'):q.eq('note_id',noteId);
+  const {data,error}=await q;
+  if(!S.hist||S.hist.noteId!==noteId)return;
+  if(error){console.error(error);S.hist.err=/note_versions|relation|schema cache|does not exist/i.test(error.message||'')?'setup':'net'}
+  else S.hist.list=noteId==='__deleted'?data.filter(v=>!S.notes.has(v.note_id)):data;
+  renderHistory();
+}
+function renderHistory(){
+  const H=S.hist,v=$('noteView');v.dataset.id='';const del=H.noteId==='__deleted';const n=S.notes.get(H.noteId);
+  $('crumbs').textContent=del?'Deleted notes':'Notes / '+((n&&n.title)||'Untitled')+' / History';
+  let body;
+  if(H.err==='setup')body=`<p class="hint">History isn't switched on yet. In Supabase, open <b>SQL Editor → New query</b>, paste the contents of <code>supabase/add-note-history.sql</code> and press <b>Run</b>. From then on, earlier versions are kept automatically.</p>`;
+  else if(H.err)body='<p class="hint">Couldn\'t load the history. Check your connection and try again.</p>';
+  else if(!H.list)body='<p class="hint">Loading…</p>';
+  else if(H.sel){const ver=H.list.find(x=>x.id===H.sel);
+    body=`<div class="hist-actions"><button class="btn" data-h="back">‹ All versions</button><button class="btn primary" data-h="restore">${del?'Restore this note':'Restore this version'}</button></div>
+    <div class="meta">${del?'Deleted':'Saved'} ${esc(fmtWhen(ver.saved_at))}${ver.saved_by?' · by '+esc(who(ver.saved_by)):''}</div>
+    <h2 class="hist-title">${esc(ver.title||'Untitled')}</h2><div class="prose hist-preview">${ver.body?renderMarkdown(ver.body):'<p class="hint">(empty)</p>'}</div>`}
+  else if(!H.list.length)body=del?'<p class="hint">No deleted notes.</p>':'<p class="hint">No earlier versions yet. From now on, a copy is kept whenever this note changes (while you type, at most one every 5 minutes) and whenever a note is deleted.</p>';
+  else body=`<ul class="hist-list">${H.list.map(x=>`<li><button data-h="pick" data-vid="${x.id}"><span class="hw">${esc(fmtWhen(x.saved_at))}${x.saved_by?' · '+esc(who(x.saved_by)):''}${x.reason==='before restore'?' · before a restore':''}</span><span class="ht2">${esc(del?(x.title||'Untitled'):((x.body||'').replace(/\s+/g,' ').slice(0,110)||'(empty)'))}</span></button></li>`).join('')}</ul>`;
+  v.innerHTML=`<div class="note-inner"><div class="hist-head"><h1 class="title-in" style="margin:0">${del?'Deleted notes':'History'}</h1><button class="btn" data-h="close">Close</button></div>
+    ${del?'':`<p class="hint">Earlier versions of <b>${esc((n&&n.title)||'Untitled')}</b>. Pick one to see it and restore it. Restoring keeps the current text in History too.</p>`}${body}</div>`;
+}
+async function restoreVersion(){
+  const H=S.hist;const ver=H&&H.list&&H.list.find(x=>x.id===H.sel);if(!ver)return;
+  if(H.noteId==='__deleted'){
+    const note={id:ver.note_id,title:ver.title||'Untitled',body:ver.body||'',createdAt:Date.now(),updatedAt:Date.now(),updatedBy:S.me};
+    S.notes.set(note.id,note);markDirty(note);await flushSave();S.hist=null;open(note.id,'read');toast('Note restored.');return}
+  const cur=S.notes.get(H.noteId);if(!cur)return;
+  const {error}=await sb.from('note_versions').insert({note_id:cur.id,title:cur.title,body:cur.body,saved_by:S.me,reason:'before restore'});
+  if(error){toast('Couldn\'t restore: the current text could not be backed up first. Try again.');return}
+  cur.title=ver.title||'Untitled';cur.body=ver.body||'';markDirty(cur);await flushSave();
+  S.hist=null;S.mode='read';renderAll();toast('Restored the version from '+fmtWhen(ver.saved_at)+'. The text you replaced is in History.');
+}
+$('noteView').addEventListener('click',e=>{const b=e.target.closest('[data-h]');if(!b||!S.hist)return;
+  const k=b.dataset.h;
+  if(k==='close'){const del=S.hist.noteId==='__deleted';S.hist=null;if(del){S.cur=null;S.phList=true}renderAll()}
+  else if(k==='pick'){S.hist.sel=+b.dataset.vid;renderHistory();$('noteView').scrollTop=0}
+  else if(k==='back'){S.hist.sel=null;renderHistory()}
+  else if(k==='restore')restoreVersion();
+});
+$('histBtn').onclick=()=>{const n=S.notes.get(S.cur);if(!n)return;if(S.hist&&S.hist.noteId===n.id){S.hist=null;renderAll()}else openHistory(n.id)};
+$('deletedBtn').onclick=()=>openHistory('__deleted');
 
 /* ---------- timeline (Gantt) ---------- */
 const STAT_LABEL={todo:'To do',doing:'In progress',done:'Done'};
@@ -315,7 +375,7 @@ $('board').addEventListener('dragover',e=>{const col=e.target.closest('.col');if
 $('board').addEventListener('drop',async e=>{const col=e.target.closest('.col');document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'));if(col&&dragId){e.preventDefault();const t=S.tasks.get(dragId);dragId=null;if(t&&t.status!==col.dataset.s)await saveTask({...t,status:col.dataset.s})}});
 $('board').addEventListener('dragend',()=>{dragId=null;document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'))});
 
-function open(id,mode){if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
+function open(id,mode){S.hist=null;if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
 $('list').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)open(b.dataset.id,'read')});
 $('links').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
@@ -330,8 +390,8 @@ $('noteView').addEventListener('click',e=>{
   const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
 $('navNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
 $('navTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
-$('mEdit').onclick=()=>{S.mode='edit';renderMain();setTimeout(()=>$('bodyIn')&&$('bodyIn').focus(),20)};
-$('mRead').onclick=()=>{if(S.unsaved.size)flushSave();S.mode='read';renderMain();renderLinks()};
+$('mEdit').onclick=()=>{S.hist=null;S.mode='edit';renderMain();setTimeout(()=>$('bodyIn')&&$('bodyIn').focus(),20)};
+$('mRead').onclick=()=>{S.hist=null;if(S.unsaved.size)flushSave();S.mode='read';renderMain();renderLinks()};
 $('newNote').onclick=()=>createNote();
 $('saveBtn').onclick=()=>{const n=S.notes.get(S.cur);if(n&&!S.unsaved.size)return;flushSave()};
 $('q').oninput=e=>{S.q=e.target.value;renderList()};
@@ -356,12 +416,13 @@ window.addEventListener('beforeunload',e=>{if(S.unsaved.size){flushSave();e.prev
 window.addEventListener('pagehide',()=>{if(S.unsaved.size)flushSave()});
 
 /* ---------- live data ---------- */
-function isTyping(id){return S.unsaved.has(id)||id===S.cur&&S.mode==='edit'&&(['bodyIn','titleIn'].includes(document.activeElement&&document.activeElement.id))}
+function staleForMe(srv,local){return !!local&&!!srv&&(local.updatedAt||0)>(srv.updatedAt||0)&&(!srv.updatedBy||!S.me||srv.updatedBy.toLowerCase()===S.me.toLowerCase())}
+function isTyping(id){return S.unsaved.has(id)}
 function onChange(table,p){
   const isNotes=table==='notes';const map=isNotes?S.notes:S.tasks;
   if(p.eventType==='DELETE'){const id=p.old&&p.old.id;if(!id)return;map.delete(id);if(isNotes&&id===S.cur)S.cur=null}
   else{const d=isNotes?fromNote(p.new):fromTask(p.new);
-    if(isNotes&&isTyping(d.id))return;
+    if(isNotes&&(isTyping(d.id)||staleForMe(d,S.notes.get(d.id))))return;
     map.set(d.id,d);if(isNotes&&d.id===S.cur)$('noteView').dataset.id=''}
   if(isNotes)renderAll();else{renderCounts();renderLinks();if(S.view==='tasks')renderBoard()}
 }
@@ -371,6 +432,7 @@ async function loadAll(){
   const fresh=new Map(n.data.map(r=>[r.id,fromNote(r)]));
   // never let server data replace text that hasn't reached the server yet
   for(const id of S.unsaved.keys()){const local=S.notes.get(id);if(local)fresh.set(id,local)}
+  for(const [id,srv] of fresh){const local=S.notes.get(id);if(local&&local!==srv&&staleForMe(srv,local))fresh.set(id,local)}
   let restored=0;const drafts=draftsAll();
   for(const [id,d] of Object.entries(drafts)){
     if(S.unsaved.has(id)||!d)continue;const srv=fresh.get(id);

@@ -51,7 +51,7 @@
       <button class="btn primary" id="newNote" title="New note">+ Note</button>
     </div>
     <div class="tag-list" id="tagList" hidden></div>
-    <div class="label" id="listLabel">All notes</div>
+    <div class="label list-head"><span id="listLabel">All notes</span><button class="link-btn" id="deletedBtn">Deleted notes</button></div>
     <ul class="list" id="list"></ul>
     <div class="account"><span id="meEmail"></span><span class="acct-btns"><button id="setPass">Set password</button><button id="signOut">Sign out</button></span></div>
   </aside>
@@ -66,6 +66,7 @@
       </div>
       <button class="btn" id="linksBtn" hidden>Links</button>
       <button class="btn save-btn" id="saveBtn" data-state="saved" disabled>Saved ✓</button>
+      <button class="btn hist-btn" id="histBtn" title="Earlier versions of this note"><span class="ico" aria-hidden="true">↺</span><span class="lbl">History</span></button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
     <div class="note" id="noteView"></div>

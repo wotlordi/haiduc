@@ -287,3 +287,28 @@ textarea.body:focus{outline:none}
 }
 .g-bar.short .g-lbl{position:absolute;left:calc(100% + 6px);color:var(--fg);overflow:visible;padding:0;text-decoration:none;opacity:1}
 .g-bar.short .g-h{flex-basis:5px}
+
+/* history */
+.list-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.link-btn{border:0;background:none;color:var(--muted);font-size:11px;text-transform:none;letter-spacing:0;padding:0;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.link-btn:hover{color:var(--accent)}
+.hist-btn .ico{display:none}
+.hist-btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.hist-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hist-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.hist-list button{width:100%;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;cursor:pointer}
+.hist-list button:hover{border-color:var(--accent)}
+.hist-list .hw{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.hist-list .ht2{font-size:14px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-actions{display:flex;gap:8px;flex-wrap:wrap}
+.hist-title{font-family:var(--display);font-size:24px;margin:4px 0 0}
+.hist-preview{border:1px dashed var(--line);border-radius:8px;padding:4px 16px;background:var(--bg)}
+@media (max-width:720px){.hist-btn .lbl{display:none}.hist-btn .ico{display:inline;font-size:17px;line-height:1}}
+.save-btn .sv-s{display:none}
+@media (max-width:720px){
+  .bar{gap:4px}
+  .bar .btn,.bar .seg button{padding:6px 8px;font-size:13px}
+  .back-btn{font-size:15px;padding:6px 2px}
+  .save-btn .sv-l{display:none}.save-btn .sv-s{display:inline}
+  .save-btn{min-width:34px}
+}
