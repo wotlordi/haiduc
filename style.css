@@ -1,17 +1,17 @@
 /* Layout: three-pane vault — file list | note | links; tasks swap into the centre as a board. */
 :root{
   --bg:#f5f5f2; --panel:#ecece7; --surface:#ffffff; --line:#d9d9d1;
-  --fg:#1d1f22; --muted:#6a6d70; --accent:#2f5d50; --accent-soft:#dde9e4;
+  --fg:#1d1f22; --muted:#6a6d70; --accent:#006ab2; --accent-soft:#dceaf5;
   --mark:#f3d36b; --warn:#a2452f; --todo:#8a6d1f; --doing:#2f5d8a; --done:#2f6d45;
   --display:"Newsreader",Georgia,serif; --ui:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#17191b; --panel:#1e2123; --surface:#232729; --line:#33383b;
-  --fg:#e6e6e1; --muted:#999d9f; --accent:#7fc0aa; --accent-soft:#25362f;
+  --fg:#e6e6e1; --muted:#999d9f; --accent:#78b8ee; --accent-soft:#1e3346;
   --mark:#8a7322; --warn:#e08a72; --todo:#d8b65a; --doing:#86b3e0; --done:#82c69a; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#17191b; --panel:#1e2123; --surface:#232729; --line:#33383b;
-  --fg:#e6e6e1; --muted:#999d9f; --accent:#7fc0aa; --accent-soft:#25362f;
+  --fg:#e6e6e1; --muted:#999d9f; --accent:#78b8ee; --accent-soft:#1e3346;
   --mark:#8a7322; --warn:#e08a72; --todo:#d8b65a; --doing:#86b3e0; --done:#82c69a; color-scheme:dark}
 html,body{height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:14px;line-height:1.5}
@@ -330,12 +330,7 @@ textarea.body:focus{outline:none}
 .grp-rename{display:flex;gap:4px;padding:4px 2px}
 .grp-rename input{flex:1;min-width:0;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;background:var(--surface)}
 .grp-rename .btn{padding:4px 8px;font-size:12px}
-.meta-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
-.grp-pick{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.grp-pick select,.grp-pick input{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:4px 8px;font-size:13px;max-width:200px}
-.grp-pick form{display:flex;gap:4px;align-items:center}
-.grp-pick .btn{padding:4px 8px;font-size:12px}
-@media (max-width:720px){.grp-act{opacity:1;width:32px;height:32px}.grp-toggle{padding:9px 6px;font-size:15px}.grp-pick select,.grp-pick input{font-size:16px}}
+@media (max-width:720px){.grp-act{opacity:1;width:32px;height:32px}.grp-toggle{padding:9px 6px;font-size:15px}}
 
 /* offline */
 .offline-bar{background:var(--mark);color:var(--fg);font-size:13px;padding:7px 16px;border-bottom:1px solid var(--line)}

@@ -194,13 +194,6 @@ function renameGroup(from,to){to=cleanGroup(to);S.renaming=null;if(!to||to===fro
   const eg=emptyGroups();if(eg.includes(from))setEmptyGroups(eg.map(x=>x===from?to:x));
   const c=groupsClosed();if(c.has(from)){setGroupClosed(from,false);setGroupClosed(to,true)}
   flushSave();renderAll();toast(`Renamed group to ${to} (${k} note${k===1?'':'s'})`)}
-function groupPicker(n){const gs=allGroups();
-  return `<div class="grp-pick"><label for="grpSel">Group</label><select id="grpSel"><option value="">No group</option>${gs.map(g=>`<option value="${esc(g)}"${g===n.folder?' selected':''}>${esc(g)}</option>`).join('')}<option value="__new">+ New group…</option></select>
-    <form id="grpNewForm" hidden><input id="grpNewIn" placeholder="Group name, e.g. Leaderboard" maxlength="60" aria-label="New group name"><button class="btn primary" type="submit">Add</button><button class="btn" type="button" id="grpNewCancel">Cancel</button></form></div>`}
-function wireGroupPicker(id){const sel=$('grpSel');if(!sel)return;
-  sel.onchange=()=>{if(sel.value==='__new'){$('grpNewForm').hidden=false;sel.hidden=true;$('grpNewIn').focus()}else moveToGroup(id,sel.value)};
-  $('grpNewForm').onsubmit=e=>{e.preventDefault();const g=cleanGroup($('grpNewIn').value);if(g)moveToGroup(id,g);else{$('grpNewForm').hidden=true;sel.hidden=false;sel.value=(S.notes.get(id)||{}).folder||''}};
-  $('grpNewCancel').onclick=()=>{$('grpNewForm').hidden=true;sel.hidden=false;sel.value=(S.notes.get(id)||{}).folder||''};}
 $('list').addEventListener('click',e=>{
   const t=e.target.closest('[data-grp-toggle]');if(t){const g=t.dataset.grpToggle;setGroupClosed(g,t.getAttribute('aria-expanded')==='true');renderList();return}
   const nw=e.target.closest('[data-grp-new]');if(nw){setGroupClosed(nw.dataset.grpNew,false);createNote(null,nw.dataset.grpNew);return}
@@ -256,13 +249,12 @@ function renderMain(){
   if(S.mode==='edit'){
     if($('bodyIn')&&v.dataset.id===n.id){
       $('metaLine').innerHTML=meta;
-      const gp=v.querySelector('.grp-pick');if(gp&&!gp.contains(document.activeElement)){gp.outerHTML=groupPicker(n);wireGroupPicker(n.id)}
       if(!S.unsaved.has(n.id)){const ta=$('bodyIn'),ti=$('titleIn');
         if(ta.value!==n.body){const pos=Math.min(ta.selectionStart,n.body.length);ta.value=n.body;ta.setSelectionRange(pos,pos);paintHl()}
         if(ti.value!==n.title&&document.activeElement!==ti)ti.value=n.title}
       return}
     v.dataset.id=n.id;
-    v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta-row"><div class="meta" id="metaLine">${meta}</div>${groupPicker(n)}</div>
+    v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta" id="metaLine">${meta}</div>
     <div class="fmt" id="fmtBar" role="toolbar" aria-label="Formatting">
       <button type="button" data-f="h1" title="Heading 1">H1</button><button type="button" data-f="h2" title="Heading 2">H2</button><button type="button" data-f="h3" title="Heading 3">H3</button>
       <button type="button" data-f="b" title="Bold"><b>B</b></button><button type="button" data-f="i" title="Italic"><i>I</i></button>
@@ -281,13 +273,12 @@ function renderMain(){
     $('linkPop').addEventListener('click',e=>{const it=e.target.closest('[data-i]');if(it){LS.i=+it.dataset.i;linkAccept()}});
     $('fmtBar').onmousedown=e=>e.preventDefault();
     $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
-    paintHl();autosize($('bodyIn'));wireGroupPicker(eid);
+    paintHl();autosize($('bodyIn'));
   }else{
     v.dataset.id='';
-    v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta-row"><div class="meta">${meta}</div>${groupPicker(n)}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
+    v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta">${meta}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
     if(PH.matches)v.querySelector('.note-inner').insertAdjacentHTML('beforeend','<section class="links-inline" id="linksInline"></section>');
     v.querySelectorAll('#prose input[type=checkbox]').forEach((cb,i)=>{cb.disabled=false;cb.onchange=()=>toggleCheck(n,i)});
-    wireGroupPicker(n.id);
   }
 }
 /* Edit-mode formatting: a colored copy of the text sits behind the transparent textarea.
