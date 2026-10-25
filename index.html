@@ -45,10 +45,18 @@
     <div class="nav">
       <button id="navNotes" aria-pressed="true">Notes <span class="count" id="cNotes">0</span></button>
       <button id="navTasks" aria-pressed="false">Tasks <span class="count" id="cTasks">0</span></button>
+      <button id="navGraph" aria-pressed="false">Graph</button>
     </div>
     <div class="search">
       <input id="q" type="search" placeholder="Search notes" aria-label="Search notes">
-      <button class="btn primary" id="newNote" title="New note">+ Note</button>
+      <button class="btn primary icon-btn" id="newNote" title="New note" aria-label="New note"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
+      <div class="add-menu">
+        <button class="btn icon-btn" id="addMenuBtn" title="Add" aria-label="Add" aria-haspopup="menu" aria-expanded="false" aria-controls="addMenu"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <div class="menu" id="addMenu" role="menu" hidden>
+          <button role="menuitem" id="newGroup"><span class="mi">▤</span>New group</button>
+          <button role="menuitem" id="menuNewTask"><span class="mi">☐</span>New task</button>
+        </div>
+      </div>
     </div>
     <div class="tag-list" id="tagList" hidden></div>
     <div class="label list-head"><span id="listLabel">All notes</span><button class="link-btn" id="deletedBtn">Deleted notes</button></div>
@@ -71,6 +79,23 @@
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
     <div class="note" id="noteView"></div>
+    <div class="graph-wrap" id="graphView" hidden>
+      <div class="g-tools">
+        <input type="search" id="gSearch" placeholder="Find a note in the graph" aria-label="Find a note in the graph">
+        <button class="btn g-opt-btn" id="gOptBtn" type="button" aria-expanded="false" aria-controls="gOpts">Options</button>
+        <div class="g-opts" id="gOpts">
+        <label><input type="checkbox" id="gLocal"> Only around current note</label>
+        <label><input type="checkbox" id="gTags"> Tags</label>
+        <label><input type="checkbox" id="gMissing" checked> Missing notes</label>
+        <label><input type="checkbox" id="gOrphans" checked> Notes without links</label>
+        <button class="btn" id="gReset" type="button">Fit to screen</button>
+        </div>
+      </div>
+      <div class="g-canvas-wrap" id="gWrap"><canvas id="gCanvas" aria-label="Graph of notes and the links between them"></canvas>
+        <div class="g-legend2" id="gLegend"></div>
+        <div class="g-empty2" id="gEmpty" hidden></div>
+      </div>
+    </div>
     <div class="board-wrap" id="taskView" hidden>
       <div class="task-head"><div class="seg" id="tvSeg" role="group" aria-label="Task view"><button id="tvBoard" aria-pressed="true">Board</button><button id="tvGantt" aria-pressed="false">Timeline</button></div></div>
       <form class="add-task" id="taskForm">
@@ -89,7 +114,8 @@
 </div>
 <nav class="tabbar" id="tabbar" hidden aria-label="Sections">
   <button id="tbNotes" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z M15 3v4h4 M9 12h7 M9 16h7"/></svg>Notes</button>
-  <button id="tbNew" class="tb-new" aria-label="New note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg></button>
+  <button id="tbNew" class="tb-new" aria-label="New note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
+  <button id="tbGraph" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="12" cy="17" r="2.3"/><path d="M8 8l2.6 7 M16.3 7.6l-2.9 7.4 M8.3 7l7.4-.8"/></svg>Graph</button>
   <button id="tbTasks" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3v3H4z M4 15h3v3H4z M10 7.5h10 M10 16.5h10"/></svg>Tasks<span class="tb-count" id="tbCount"></span></button>
 </nav>
 <div class="toast" id="toast" hidden></div>
