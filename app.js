@@ -69,6 +69,7 @@ async function flushSave(){
   if(failed){if(!navigator.onLine)setSaveState('offline');else{setSaveState('error');retryTimer=setTimeout(flushSave,5000)}}
   else if(S.unsaved.size){setSaveState('dirty');saveTimer=setTimeout(flushSave,400)}
   else setSaveState('saved');
+  bkAutoSoon();
   saveCache();renderList();
 }
 function setSaveState(st){
@@ -227,10 +228,10 @@ function renderMarkdown(src){
 }
 function renderMain(){
   const phone=PH.matches;
-  $('app').classList.toggle('ph-list',phone&&S.view==='notes'&&(S.phList||(!S.notes.get(S.cur)&&!(S.hist&&S.hist.noteId==='__deleted'))));
+  $('app').classList.toggle('ph-list',phone&&S.view==='notes'&&((S.phList&&!S.backupOpen)||(!S.backupOpen&&!S.notes.get(S.cur)&&!(S.hist&&S.hist.noteId==='__deleted'))));
   $('tabbar').hidden=!phone||$('app').hidden;
   $('tbNotes').setAttribute('aria-pressed',S.view==='notes');$('tbTasks').setAttribute('aria-pressed',S.view==='tasks');$('tbGraph').setAttribute('aria-pressed',S.view==='graph');
-  $('app').classList.toggle('tasks-mode',S.view==='tasks'||S.view==='graph');$('app').classList.toggle('graph-mode',S.view==='graph');
+  $('app').classList.toggle('tasks-mode',S.view==='tasks'||S.view==='graph');$('app').classList.toggle('graph-mode',S.view==='graph');$('app').classList.toggle('backup-mode',!!S.backupOpen&&S.view==='notes');
   $('navNotes').setAttribute('aria-pressed',S.view==='notes');$('navTasks').setAttribute('aria-pressed',S.view==='tasks');$('navGraph').setAttribute('aria-pressed',S.view==='graph');
   $('noteView').hidden=S.view!=='notes';$('taskView').hidden=S.view!=='tasks';$('graphView').hidden=S.view!=='graph';
   const n=S.notes.get(S.cur);
@@ -238,6 +239,7 @@ function renderMain(){
   $('delBtn').classList.remove('arm');$('delBtn').textContent='Delete';
   if(S.view==='tasks'){$('crumbs').textContent='Tasks';renderBoard();return}
   if(S.view==='graph'){$('crumbs').textContent='Graph';graphShow();return}
+  if(S.backupOpen){graphHide();renderBackup();return}
   graphHide();
   $('mEdit').setAttribute('aria-pressed',S.mode==='edit');$('mRead').setAttribute('aria-pressed',S.mode==='read');
   const v=$('noteView');
@@ -644,7 +646,7 @@ $('board').addEventListener('dragover',e=>{const col=e.target.closest('.col');if
 $('board').addEventListener('drop',async e=>{const col=e.target.closest('.col');document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'));if(col&&dragId){e.preventDefault();const t=S.tasks.get(dragId);dragId=null;if(t&&t.status!==col.dataset.s)await saveTask({...t,status:col.dataset.s})}});
 $('board').addEventListener('dragend',()=>{dragId=null;document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'))});
 
-function open(id,mode){S.hist=null;{const nn=S.notes.get(id);if(nn&&nn.folder)setGroupClosed(nn.folder,false)}if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
+function open(id,mode){S.hist=null;S.backupOpen=false;{const nn=S.notes.get(id);if(nn&&nn.folder)setGroupClosed(nn.folder,false)}if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
 $('list').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)open(b.dataset.id,'read')});
 /* ---------- drag notes between groups (mouse: drag; touch: press and hold, then drag) ---------- */
 let dnd=null;
@@ -727,8 +729,8 @@ $('noteView').addEventListener('click',e=>{
   if(lb){if(lb.dataset.open)open(lb.dataset.open,'read');else if(lb.dataset.title){const ex=byTitle(lb.dataset.title);ex?open(ex.id,'read'):createNote(lb.dataset.title)}else if(lb.dataset.tasks){S.view='tasks';renderAll()}return}
   const tg=e.target.closest('a.tag');if(tg){e.preventDefault();showTag(tg.dataset.tag);return}
   const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
-$('navNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
-$('navTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
+$('navNotes').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
+$('navTasks').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
 $('mEdit').onclick=()=>{S.hist=null;S.mode='edit';renderMain();setTimeout(()=>$('bodyIn')&&$('bodyIn').focus(),20)};
 $('mRead').onclick=()=>{S.hist=null;if(S.unsaved.size)flushSave();S.mode='read';renderMain();renderLinks()};
 $('newNote').onclick=()=>createNote();
@@ -736,10 +738,10 @@ $('saveBtn').onclick=()=>{const n=S.notes.get(S.cur);if(n&&!S.unsaved.size)retur
 $('q').oninput=e=>{S.q=e.target.value;renderList()};
 $('tagList').addEventListener('click',e=>{const b=e.target.closest('[data-tag]');if(!b)return;const t=b.dataset.tag;if(S.q==='#'+t){S.q='';$('q').value='';renderList()}else showTag(t)});
 $('menuBtn').onclick=()=>{if(S.unsaved.size)flushSave();S.phList=true;S.mode='read';renderAll()};
-$('tbNotes').onclick=()=>{if(S.unsaved.size)flushSave();S.view='notes';S.phList=true;renderAll()};
-$('navGraph').onclick=()=>{if(S.unsaved.size)flushSave();S.view='graph';$('app').classList.remove('drawer');renderAll()};
-$('tbGraph').onclick=()=>{if(S.unsaved.size)flushSave();S.view='graph';renderAll()};
-$('tbTasks').onclick=()=>{if(S.unsaved.size)flushSave();S.view='tasks';renderAll()};
+$('tbNotes').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='notes';S.phList=true;renderAll()};
+$('navGraph').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='graph';$('app').classList.remove('drawer');renderAll()};
+$('tbGraph').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='graph';renderAll()};
+$('tbTasks').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='tasks';renderAll()};
 $('tbNew').onclick=()=>{if(S.view==='tasks'){const t=$('tTitle');t.scrollIntoView({block:'center'});t.focus();}else createNote()};
 PH.addEventListener('change',()=>renderAll());
 $('linksBtn').onclick=()=>$('app').classList.toggle('show-links');
@@ -864,6 +866,116 @@ $('signOut').onclick=async()=>{
   if(S.unsaved.size)await flushSave();await flushPending();
   if(pendCount()){toast('Some changes haven\'t uploaded yet. Connect to the internet first, or they\'ll be lost when you sign out.');return}
   if(channel)sb.removeChannel(channel);await sb.auth.signOut();clearLocal();S.notes.clear();S.tasks.clear();S.live=false;S.me=null;showLogin()};
+
+/* ---------- night mode: Auto (follow device) → Dark → Light ---------- */
+const THEME_ICON={"auto": "<svg class=\"ico\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 4a8 8 0 0 1 0 16z\" fill=\"currentColor\"/></svg>", "dark": "<svg class=\"ico\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z\"/></svg>", "light": "<svg class=\"ico\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"/></svg>"};
+const THEMES=['auto','dark','light'],THEME_NAME={auto:'Auto',dark:'Dark',light:'Light'};
+function currentTheme(){try{const t=localStorage.getItem('haiduc.theme');return THEMES.includes(t)?t:'auto'}catch(e){return 'auto'}}
+function applyTheme(t){const r=document.documentElement;if(t==='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',t);
+  const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{m.setAttribute('content',dark?'#17191b':'#f5f5f2');m.removeAttribute('media')});
+  const b=$('themeBtn');if(b){b.querySelector('.ico').outerHTML=THEME_ICON[t];b.title='Theme: '+THEME_NAME[t];b.setAttribute('aria-label','Theme: '+THEME_NAME[t]+(t==='auto'?' (follows this device)':'')+'. Click to change.');$('themeLbl').textContent=THEME_NAME[t];b.dataset.t=t}
+  if(typeof G!=='undefined'&&G.visible){gReadColors();gKick(0)}}
+$('themeBtn').onclick=()=>{const t=THEMES[(THEMES.indexOf(currentTheme())+1)%THEMES.length];try{localStorage.setItem('haiduc.theme',t)}catch(e){}applyTheme(t);toast(t==='auto'?'Theme: Auto (follows your device)':'Theme: '+THEME_NAME[t])};
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(currentTheme()==='auto')applyTheme('auto')});
+applyTheme(currentTheme());
+
+/* ---------- backups to this device: a .zip download anywhere, or a folder kept up to date (Chrome/Edge on a computer) ---------- */
+const BK={dir:null,perm:null,busy:false,timer:0,last:lsJSON('haiduc.bk.last',null),auto:lsJSON('haiduc.bk.auto',true),written:lsJSON('haiduc.bk.files',{})};
+const canFolder=()=>'showDirectoryPicker' in window;
+function safeName(s){return (String(s||'Untitled').replace(/[\\/:*?"<>|#^\[\]]/g,'-').replace(/\s+/g,' ').trim().slice(0,100)||'Untitled').replace(/^\.+/,'_')}
+function backupFiles(){
+  // one Markdown file per note (in a folder per group) + Tasks.md + a full copy for restoring
+  const files=[],used=new Set();
+  const notes=[...S.notes.values()].sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+  for(const n of notes){const dir=n.folder?safeName(n.folder)+'/':'';let base=safeName(n.title),p=dir+base+'.md',i=2;
+    while(used.has(p.toLowerCase()))p=dir+base+' ('+(i++)+').md';used.add(p.toLowerCase());files.push({path:p,text:n.body||''})}
+  const tl=[...S.tasks.values()].sort((a,b)=>(a.status>b.status?1:-1)||(a.due||'9').localeCompare(b.due||'9'));
+  const sec=(st,h)=>{const l=tl.filter(t=>t.status===st);return l.length?`## ${h}\n`+l.map(t=>{const nt=t.noteId&&S.notes.get(t.noteId);
+    return `- [${st==='done'?'x':' '}] ${t.title}${t.start||t.due?` (${t.start||'…'} → ${t.due||'no due date'})`:''}${nt?` [[${nt.title}]]`:''}${t.assignee?` @${who(t.assignee)}`:''}`}).join('\n')+'\n\n':''};
+  files.push({path:'Tasks.md',text:'# Tasks\n\n'+sec('doing','In progress')+sec('todo','To do')+sec('done','Done')});
+  files.push({path:'.haiduc/backup.json',text:JSON.stringify({app:'Haiduc',version:1,exported:new Date().toISOString(),by:S.me,notes:notes,tasks:tl},null,1)});
+  return files;
+}
+// minimal .zip writer (files stored without compression; Windows, macOS, iPhone and Android all open these)
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function makeZip(files){
+  const enc=new TextEncoder(),parts=[],central=[];let off=0;const d=new Date();
+  const dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xFFFF,dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF;
+  for(const f of files){const name=enc.encode('Haiduc/'+f.path),data=enc.encode(f.text),crc=crc32(data);
+    const h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);h.setUint16(10,dt,true);h.setUint16(12,dd,true);h.setUint32(14,crc,true);h.setUint32(18,data.length,true);h.setUint32(22,data.length,true);h.setUint16(26,name.length,true);h.setUint16(28,0,true);
+    parts.push(h.buffer,name,data);
+    const c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);c.setUint16(12,dt,true);c.setUint16(14,dd,true);c.setUint32(16,crc,true);c.setUint32(20,data.length,true);c.setUint32(24,data.length,true);c.setUint16(28,name.length,true);c.setUint32(42,off,true);
+    central.push(c.buffer,name);off+=30+name.length+data.length}
+  const csize=central.reduce((s,b)=>s+(b.byteLength||b.length),0);
+  const e=new DataView(new ArrayBuffer(22));e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,csize,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...central,e.buffer],{type:'application/zip'})}
+function bkStamp(kind){BK.last={at:Date.now(),kind};try{localStorage.setItem('haiduc.bk.last',JSON.stringify(BK.last))}catch(e){}}
+async function downloadBackup(){
+  const name=`Haiduc backup ${todayISO()}.zip`,blob=makeZip(backupFiles());
+  const file=new File([blob],name,{type:'application/zip'});
+  if(PH.matches&&navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file],title:name});bkStamp('zip');renderBackup();return}catch(e){if(e&&e.name==='AbortError')return}}
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+  bkStamp('zip');renderBackup();toast('Backup downloaded: '+name);
+}
+// remember the chosen folder (browsers let us keep the folder "handle" in IndexedDB)
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('haiduc',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function kvGet(k){try{const db=await idb();return await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r(null)})}catch(e){return null}}
+async function kvSet(k,v){try{const db=await idb();await new Promise(r=>{const t=db.transaction('kv','readwrite');v===undefined?t.objectStore('kv').delete(k):t.objectStore('kv').put(v,k);t.oncomplete=r;t.onerror=r})}catch(e){}}
+async function bkLoadDir(){if(!canFolder())return;BK.dir=await kvGet('bkDir')||null;if(BK.dir){try{BK.perm=await BK.dir.queryPermission({mode:'readwrite'})}catch(e){BK.perm='prompt'}}}
+async function chooseFolder(){
+  try{const d=await window.showDirectoryPicker({id:'haiduc-backup',mode:'readwrite',startIn:'documents'});
+    BK.dir=d;BK.perm='granted';BK.written={};await kvSet('bkDir',d);try{localStorage.setItem('haiduc.bk.files','{}')}catch(e){}
+    await syncFolder(true);}catch(e){if(e&&e.name!=='AbortError'){console.error(e);toast('Couldn\'t use that folder. Try another one, for example in Documents.')}}
+  renderBackup()}
+async function reconnectFolder(){if(!BK.dir)return;try{BK.perm=await BK.dir.requestPermission({mode:'readwrite'})}catch(e){BK.perm='denied'}if(BK.perm==='granted')await syncFolder(true);renderBackup()}
+async function forgetFolder(){BK.dir=null;BK.perm=null;await kvSet('bkDir',undefined);renderBackup()}
+async function writeFile(root,path,text){const parts=path.split('/');let dir=root;for(const p of parts.slice(0,-1))dir=await dir.getDirectoryHandle(p,{create:true});
+  const fh=await dir.getFileHandle(parts[parts.length-1],{create:true});const w=await fh.createWritable();await w.write(text);await w.close()}
+async function removeFile(root,path){try{const parts=path.split('/');let dir=root;for(const p of parts.slice(0,-1))dir=await dir.getDirectoryHandle(p);await dir.removeEntry(parts[parts.length-1])}catch(e){}}
+async function syncFolder(manual){
+  if(!BK.dir||BK.busy)return;
+  if(BK.perm!=='granted'){try{BK.perm=await BK.dir.queryPermission({mode:'readwrite'})}catch(e){}if(BK.perm!=='granted'){if(manual)renderBackup();return}}
+  BK.busy=true;let changed=0;
+  try{const files=backupFiles(),now={};
+    for(const f of files){const h=crc32(new TextEncoder().encode(f.text));now[f.path]=h;if(BK.written[f.path]!==h||manual&&f.path==='Tasks.md'){await writeFile(BK.dir,f.path,f.text);changed++}}
+    // notes that were renamed, moved or deleted: remove the old file we wrote earlier
+    for(const p of Object.keys(BK.written))if(!(p in now)){await removeFile(BK.dir,p);changed++}
+    BK.written=now;try{localStorage.setItem('haiduc.bk.files',JSON.stringify(now))}catch(e){}
+    bkStamp('folder');if(manual)toast(changed?`Saved to folder "${BK.dir.name}" (${changed} file${changed===1?'':'s'} updated)`:`Folder "${BK.dir.name}" is already up to date`);
+  }catch(e){console.error(e);BK.perm=null;toast('Couldn\'t write to the backup folder. Open Backup to reconnect it.')}
+  BK.busy=false;if(S.backupOpen)renderBackup()}
+function bkAutoSoon(){if(!BK.dir||!BK.auto||BK.perm!=='granted')return;clearTimeout(BK.timer);BK.timer=setTimeout(()=>syncFolder(false),2500)}
+function openBackup(){if(S.unsaved.size)flushSave();S.backupOpen=true;S.view='notes';S.phList=false;S.hist=null;$('app').classList.remove('drawer');renderAll()}
+function renderBackup(){
+  const v=$('noteView');if(!v||!S.backupOpen)return;v.dataset.id='';$('crumbs').textContent='Backup';
+  for(const id of ['modeSeg','delBtn','histBtn','saveBtn','linksBtn'])$(id).hidden=true;
+  const last=BK.last?`Last backup: ${fmtWhen(new Date(BK.last.at).toISOString())} (${BK.last.kind==='folder'?'folder':'download'})`:'No backup made on this device yet.';
+  const nN=S.notes.size,nT=S.tasks.size;
+  let folder='';
+  if(canFolder()){
+    if(!BK.dir)folder=`<p>Pick a folder on this computer, for example <b>Documents\\Haiduc</b>. Every note is saved there as a Markdown file, in a folder per group, and the folder is updated automatically while you work.</p><button class="btn primary" data-bk="choose">Choose a folder…</button>`;
+    else if(BK.perm!=='granted')folder=`<p>Backup folder: <b>${esc(BK.dir.name)}</b>. Your browser needs your OK again to write to it.</p><div class="bk-row"><button class="btn primary" data-bk="reconnect">Allow access to "${esc(BK.dir.name)}"</button><button class="btn" data-bk="forget">Use a different folder</button></div>`;
+    else folder=`<p>Backup folder: <b>${esc(BK.dir.name)}</b> · ${BK.busy?'saving…':'up to date'}</p>
+      <label class="bk-auto"><input type="checkbox" id="bkAuto"${BK.auto?' checked':''}> Keep this folder updated automatically while Haiduc is open</label>
+      <div class="bk-row"><button class="btn primary" data-bk="sync">Save to folder now</button><button class="btn" data-bk="choose">Choose another folder…</button><button class="btn" data-bk="forget">Stop using this folder</button></div>`;
+  }else folder=`<p class="hint">Saving straight into a folder works in Chrome or Edge on a computer. ${PH.matches?'On a phone, use the download below and save it to Files.':'In this browser, use the download below.'}</p>`;
+  v.innerHTML=`<div class="note-inner bk"><div class="hist-head"><h1 class="title-in" style="margin:0">Backup</h1><button class="btn" data-bk="close">Close</button></div>
+    <p class="hint">${nN} note${nN===1?'':'s'} and ${nT} task${nT===1?'':'s'} · ${esc(last)}</p>
+    <section class="bk-card"><h2>Download a backup</h2><p>One <b>.zip</b> file with every note as a Markdown file (a folder per group), a <b>Tasks.md</b> list, and a full copy for restoring.${PH.matches?' On iPhone, choose <b>Save to Files</b> to keep it in iCloud Drive or on the phone.':' It goes to your Downloads folder.'}</p>
+      <button class="btn primary" data-bk="zip">${PH.matches?'Save backup…':'Download backup (.zip)'}</button></section>
+    <section class="bk-card"><h2>Keep a folder on this computer up to date</h2>${folder}</section>
+    <p class="hint">The files use the same format as Obsidian, so a backup folder can also be opened there. Backups only include what this device has loaded, so open Haiduc online first for the newest version.</p></div>`;
+  const au=$('bkAuto');if(au)au.onchange=()=>{BK.auto=au.checked;try{localStorage.setItem('haiduc.bk.auto',JSON.stringify(BK.auto))}catch(e){}if(BK.auto)syncFolder(false)};
+}
+$('noteView').addEventListener('click',e=>{const b=e.target.closest('[data-bk]');if(!b||!S.backupOpen)return;const k=b.dataset.bk;
+  if(k==='close'){S.backupOpen=false;renderAll()}else if(k==='zip')downloadBackup();else if(k==='choose')chooseFolder();
+  else if(k==='reconnect')reconnectFolder();else if(k==='forget')forgetFolder();else if(k==='sync')syncFolder(true)});
+$('backupBtn').onclick=openBackup;
+$('menuBackup').onclick=()=>{setAddMenu(false);openBackup()};
+bkLoadDir().then(()=>{if(BK.perm==='granted')bkAutoSoon()});
 
 function boot(){
   if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(e=>console.warn('offline cache unavailable',e));
