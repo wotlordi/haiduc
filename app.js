@@ -267,11 +267,16 @@ function renderMain(){
       <button type="button" data-f="ul" title="List">• List</button><button type="button" data-f="todo" title="To-do">☐ To-do</button>
       <button type="button" data-f="link" title="Link to note">[[ ]]</button><button type="button" data-f="tag" title="Tag">#</button>
     </div>
-    <div class="editor"><pre class="hl" id="bodyHl" aria-hidden="true"></pre><textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…" spellcheck="true">${esc(n.body)}</textarea></div>
+    <div class="editor"><pre class="hl" id="bodyHl" aria-hidden="true"></pre><textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…" spellcheck="true" aria-autocomplete="list" aria-controls="linkPop">${esc(n.body)}</textarea><div class="link-pop" id="linkPop" role="listbox" hidden></div></div>
     <div class="hint"><code>[[Other note]]</code> link · <code>#tag</code> · <code># Heading</code> · <code>- [ ] to-do</code> · <code>**bold**</code> · <code>==highlight==</code></div></div>`;
     const eid=n.id;
     $('titleIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.title=e.target.value;$('crumbs').textContent='Notes / '+(cur.title||'Untitled');markDirty(cur)};
-    $('bodyIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.body=e.target.value;paintHl();autosize(e.target);markDirty(cur)};
+    $('bodyIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.body=e.target.value;paintHl();autosize(e.target);markDirty(cur);linkSuggest()};
+    $('bodyIn').onkeydown=linkKeys;
+    $('bodyIn').addEventListener('click',linkSuggest);
+    $('bodyIn').addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==$('bodyIn'))linkClose()},150));
+    $('linkPop').addEventListener('pointerdown',e=>e.preventDefault()); // keep the keyboard open on phones
+    $('linkPop').addEventListener('click',e=>{const it=e.target.closest('[data-i]');if(it){LS.i=+it.dataset.i;linkAccept()}});
     $('fmtBar').onmousedown=e=>e.preventDefault();
     $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
     paintHl();autosize($('bodyIn'));wireGroupPicker(eid);
@@ -311,6 +316,57 @@ function applyFmt(f){
   else if(f==='ul')prefix('- ');else if(f==='todo')prefix('- [ ] ');
   else if(f==='link')wrap('[[',']]','Note name');
   else if(f==='tag'){const sel=v.slice(s,e).replace(/\s+/g,'-')||'tag';set('#'+sel,s,e,s+1,s+1+sel.length)}
+}
+/* ---------- [[link]] suggestions while typing ---------- */
+const LS={open:false,items:[],i:0,start:0,end:0,q:''};
+function linkContext(){const ta=$('bodyIn');if(!ta||ta.selectionStart!==ta.selectionEnd&&!/^\]\]/.test(ta.value.slice(ta.selectionEnd)))return null;
+  const v=ta.value,pos=ta.selectionStart,ls=v.lastIndexOf('\n',pos-1)+1;const before=v.slice(ls,pos);
+  const k=before.lastIndexOf('[[');if(k<0)return null;const q=before.slice(k+2);
+  if(/[\[\]|]/.test(q)||q.length>60)return null;
+  // when the toolbar inserted [[Note name]] with the name selected, replace the selection
+  const selEnd=ta.selectionEnd;
+  return{start:ls+k+2,end:Math.max(pos,selEnd),q:ta.selectionStart!==selEnd?'':q}}
+function linkSuggest(){
+  const c=linkContext();if(!c){linkClose();return}
+  const q=c.q.trim().toLowerCase(),self=S.cur;
+  let list=[...S.notes.values()].filter(n=>n.id!==self&&(n.title||'').trim());
+  if(q)list=list.filter(n=>n.title.toLowerCase().includes(q));
+  list.sort((x,y)=>{const a=x.title.toLowerCase(),b=y.title.toLowerCase();return (q?(b.startsWith(q)-a.startsWith(q)):0)||(y.updatedAt||0)-(x.updatedAt||0)});
+  const items=list.slice(0,8).map(n=>({title:n.title,folder:n.folder||''}));
+  if(c.q.trim()&&![...S.notes.values()].some(n=>n.title.trim().toLowerCase()===q))items.push({title:c.q.trim(),isNew:true});
+  if(!items.length){linkClose();return}
+  Object.assign(LS,{open:true,items,i:Math.min(LS.open?LS.i:0,items.length-1),start:c.start,end:c.end,q:c.q});
+  const pop=$('linkPop');
+  pop.innerHTML=items.map((it,i)=>`<div class="lp-item${i===LS.i?' on':''}" role="option" aria-selected="${i===LS.i}" data-i="${i}">${it.isNew?`<span class="lp-t"><span class="lp-new">+ New note:</span> ${esc(it.title)}</span>`:`<span class="lp-t">${lpMark(it.title,q)}</span>${it.folder?`<span class="lp-g">${esc(it.folder)}</span>`:''}`}</div>`).join('')+'<div class="lp-hint">↑↓ choose · Enter insert · Esc close</div>';
+  pop.hidden=false;linkPlace();
+}
+function lpMark(t,q){if(!q)return esc(t);const i=t.toLowerCase().indexOf(q);if(i<0)return esc(t);return esc(t.slice(0,i))+'<b>'+esc(t.slice(i,i+q.length))+'</b>'+esc(t.slice(i+q.length))}
+function linkPlace(){
+  // find where the cursor is by laying the text out in an invisible copy of the editor
+  const ta=$('bodyIn'),pop=$('linkPop'),ed=ta.parentElement;
+  const m=document.createElement('pre');m.className='hl lp-mirror';m.setAttribute('aria-hidden','true');
+  m.innerHTML=esc(ta.value.slice(0,LS.start-2))+'<span id="lpCaret">[[</span>';ed.appendChild(m);
+  const mk=m.querySelector('#lpCaret');const top=mk.offsetTop+mk.offsetHeight+4;let left=mk.offsetLeft;m.remove();
+  const w=Math.min(320,ed.clientWidth);left=Math.max(0,Math.min(left,ed.clientWidth-w));
+  pop.style.left=left+'px';pop.style.top=top+'px';pop.style.width=w+'px';
+  const r=pop.getBoundingClientRect(),vh=window.visualViewport?window.visualViewport.height:window.innerHeight;
+  if(r.bottom>vh-8)pop.scrollIntoView({block:'nearest'});
+}
+function linkClose(){LS.open=false;const p=$('linkPop');if(p)p.hidden=true}
+function linkKeys(e){
+  if(!LS.open)return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();LS.i=(LS.i+(e.key==='ArrowDown'?1:-1)+LS.items.length)%LS.items.length;
+    [...$('linkPop').querySelectorAll('.lp-item')].forEach((el,i)=>{el.classList.toggle('on',i===LS.i);el.setAttribute('aria-selected',i===LS.i)});return}
+  if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();linkAccept();return}
+  if(e.key==='Escape'){e.preventDefault();linkClose()}
+}
+function linkAccept(){
+  const it=LS.items[LS.i];if(!it)return;const ta=$('bodyIn');const v=ta.value;
+  let end=LS.end;const hasClose=v.slice(end,end+2)===']]';
+  const text=it.title+(hasClose?'':']]');ta.focus();ta.setSelectionRange(LS.start,end);
+  if(!document.execCommand('insertText',false,text))ta.setRangeText(text,LS.start,end,'end');
+  const caret=LS.start+it.title.length+2;ta.setSelectionRange(caret,caret);
+  linkClose();ta.dispatchEvent(new Event('input'));linkClose();
 }
 function autosize(t){if(t){t.style.height='';t.scrollTop=0}}
 document.addEventListener('scroll',e=>{if(e.target&&e.target.id==='bodyIn')e.target.scrollTop=0},true);
