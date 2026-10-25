@@ -763,8 +763,11 @@ function onChange(table,p){
   const isNotes=table==='notes';const map=isNotes?S.notes:S.tasks;
   if(p.eventType==='DELETE'){const id=p.old&&p.old.id;if(!id)return;map.delete(id);if(isNotes&&id===S.cur)S.cur=null}
   else{const d=isNotes?fromNote(p.new):fromTask(p.new);
-    if(isNotes&&(isTyping(d.id)||staleForMe(d,S.notes.get(d.id))))return;
-    map.set(d.id,d);if(isNotes&&d.id===S.cur)$('noteView').dataset.id=''}
+    if(isNotes){const local=S.notes.get(d.id);
+      if(isTyping(d.id)||staleForMe(d,local))return;
+      // our own save coming back (or no visible change): update quietly, don't touch the editor
+      if(local&&local.title===d.title&&local.body===d.body&&(local.folder||'')===(d.folder||'')){local.updatedAt=d.updatedAt;local.updatedBy=d.updatedBy;renderList();return}}
+    map.set(d.id,d)}
   if(isNotes)renderAll();else{renderCounts();renderLinks();if(S.view==='tasks')renderBoard()}
 }
 async function loadAll(){
