@@ -1,8 +1,9 @@
 (function(){
+const PEND_KEY_INIT='haiduc.pending.v1';
 const $=id=>document.getElementById(id);
 const CFG=window.VAULT_CONFIG||{};
 const PH=window.matchMedia('(max-width:720px)');
-const S={hist:null,tv:(()=>{try{return localStorage.getItem('haiduc.tv')==='gantt'?'gantt':'board'}catch(e){return 'board'}})(),editDates:null,unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
+const S={pend:(()=>{const p=lsJSON(PEND_KEY_INIT,null)||{};return{tasks:p.tasks||{},noteDel:p.noteDel||{}}})(),hist:null,tv:(()=>{try{return localStorage.getItem('haiduc.tv')==='gantt'?'gantt':'board'}catch(e){return 'board'}})(),editDates:null,unsaved:new Map(),phList:true,notes:new Map(),tasks:new Map(),cur:null,view:'notes',mode:'read',q:'',me:null,dirty:false,live:false};
 let sb=null, saveTimer=null, pendingSave=null, channel=null;
 const STATUS=[['todo','To do'],['doing','In progress'],['done','Done']];
 
@@ -15,7 +16,7 @@ function who(email){if(!email)return'';if(S.me&&email.toLowerCase()===S.me.toLow
 
 /* ---------- row mapping ---------- */
 const ms=v=>v?new Date(v).getTime():0;
-function fromNote(r){return{id:r.id,title:r.title,body:r.body||'',createdAt:ms(r.created_at),updatedAt:ms(r.updated_at),updatedBy:r.updated_by}}
+function fromNote(r){return{id:r.id,title:r.title,body:r.body||'',folder:r.folder||'',createdAt:ms(r.created_at),updatedAt:ms(r.updated_at),updatedBy:r.updated_by}}
 function fromTask(r){return{id:r.id,title:r.title,status:r.status||'todo',start:r.start_date||'',due:r.due||'',noteId:r.note_id||'',assignee:r.assignee||'',createdAt:ms(r.created_at),createdBy:r.created_by}}
 function toTask(t){const r={id:t.id,title:t.title,status:t.status,start_date:t.start||null,due:t.due||null,note_id:t.noteId||null,assignee:t.assignee||null,created_at:new Date(t.createdAt||Date.now()).toISOString(),created_by:t.createdBy||null};if(S.noStartCol)delete r.start_date;return r}
 
@@ -36,10 +37,10 @@ async function run(q,kind){
    A note only counts as saved after the server confirms it; failed saves are retried. */
 const DRAFT='haiduc.draft.';
 let saving=null,again=false,retryTimer=null,saveState='saved';
-function draftPut(n){try{localStorage.setItem(DRAFT+n.id,JSON.stringify({title:n.title,body:n.body,at:Date.now(),createdAt:n.createdAt||Date.now()}))}catch(e){}}
+function draftPut(n){try{localStorage.setItem(DRAFT+n.id,JSON.stringify({title:n.title,body:n.body,folder:n.folder||'',at:Date.now(),createdAt:n.createdAt||Date.now()}))}catch(e){}}
 function draftDel(id){try{localStorage.removeItem(DRAFT+id)}catch(e){}}
 function draftsAll(){const out={};try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(DRAFT)){try{out[k.slice(DRAFT.length)]=JSON.parse(localStorage.getItem(k))}catch(e){}}}}catch(e){}return out}
-function markDirty(n){S.unsaved.set(n.id,(S.unsaved.get(n.id)||0)+1);draftPut(n);setSaveState('dirty');clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,1200)}
+function markDirty(n){S.unsaved.set(n.id,(S.unsaved.get(n.id)||0)+1);draftPut(n);saveCache();setSaveState('dirty');clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,1200)}
 function scheduleSave(){const n=S.notes.get(S.cur);if(n)markDirty(n)}
 async function flushSave(){
   clearTimeout(saveTimer);clearTimeout(retryTimer);
@@ -50,45 +51,96 @@ async function flushSave(){
     let failed=false;
     for(const [id,ver] of [...S.unsaved]){
       const n=S.notes.get(id);if(!n){S.unsaved.delete(id);draftDel(id);continue}
-      n.updatedAt=Date.now();n.updatedBy=S.me;
-      let res;try{res=await sb.from('notes').upsert({id:n.id,title:n.title||'Untitled',body:n.body||'',updated_at:new Date(n.updatedAt).toISOString(),updated_by:S.me})}catch(e){res={error:e}}
+      const ts=Date.now();
+      const row={id:n.id,title:n.title||'Untitled',body:n.body||'',updated_at:new Date(ts).toISOString(),updated_by:S.me};
+      if(!S.noFolderCol)row.folder=n.folder||null;
+      let res;try{res=await sb.from('notes').upsert(row)}catch(e){res={error:e}}
+      if(res.error&&/folder/.test(res.error.message||'')){S.noFolderCol=true;delete row.folder;
+        toast('Groups can\'t be stored yet. Run the small database update in Supabase (SQL Editor).');
+        try{res=await sb.from('notes').upsert(row)}catch(e){res={error:e}}}
       if(res.error){failed=true;console.error(res.error);continue}
+      n.updatedAt=ts;n.updatedBy=S.me;
       if(S.unsaved.get(id)===ver){S.unsaved.delete(id);draftDel(id)}
     }
     return failed;
   })();
   const failed=await saving;saving=null;
   if(again){again=false;return flushSave()}
-  if(failed){setSaveState('error');retryTimer=setTimeout(flushSave,5000)}
+  if(failed){if(!navigator.onLine)setSaveState('offline');else{setSaveState('error');retryTimer=setTimeout(flushSave,5000)}}
   else if(S.unsaved.size){setSaveState('dirty');saveTimer=setTimeout(flushSave,400)}
   else setSaveState('saved');
-  renderList();
+  saveCache();renderList();
 }
 function setSaveState(st){
   saveState=st;const b=$('saveBtn');
-  if(b){b.dataset.state=st;const L={dirty:['Save','Save'],saving:['Saving…','…'],saved:['Saved ✓','✓'],error:['Not saved · Retry','Retry']}[st];b.innerHTML=`<span class="sv-l">${L[0]}</span><span class="sv-s">${L[1]}</span>`;b.title=L[0];b.disabled=st==='saving'||st==='saved'}
+  if(b){b.dataset.state=st;const L={dirty:['Save','Save'],saving:['Saving…','…'],saved:['Saved ✓','✓'],error:['Not saved · Retry','Retry'],offline:['Saved on this device','Offline']}[st];b.innerHTML=`<span class="sv-l">${L[0]}</span><span class="sv-s">${L[1]}</span>`;b.title=L[0];b.disabled=st==='saving'||st==='saved'}
   setStatus();
 }
-function setStatus(){const s=$('status');
+function setStatus(){const s=$('status');const off=!navigator.onLine;
+  const ob=$('offBar');if(ob){ob.hidden=!off;const k=pendCount();ob.textContent=off?(k?`You're offline. ${k} change${k===1?' is':'s are'} kept on this device and will upload when you're back online.`:'You\'re offline. You can keep reading and writing; changes upload when you\'re back online.'):''}
+  if(off){const k=pendCount();s.textContent=k?`offline · ${k} waiting`:'offline';s.className='status off';return}
+  if(saveState!=='dirty'&&saveState!=='saving'&&Object.keys(S.pend.tasks).length+Object.keys(S.pend.noteDel).length){s.textContent='uploading…';s.className='status';return}
   if(!S.live){s.textContent='connecting…';s.className='status';return}
   s.textContent={dirty:'unsaved changes',saving:'saving…',saved:'all saved',error:'not saved, retrying'}[saveState];
   s.className='status'+(saveState==='error'?' off':'');
 }
-async function createNote(title){
+async function createNote(title,folder){
   let t=(title||'Untitled').trim()||'Untitled';
   if(!title){let i=1;while(byTitle(t))t='Untitled '+(++i)}
   const id=newId('n');const now=Date.now();
-  const note={id,title:t,body:'',createdAt:now,updatedAt:now,updatedBy:S.me};S.notes.set(id,note);open(id,'edit');
+  const note={id,title:t,body:'',folder:folder||'',createdAt:now,updatedAt:now,updatedBy:S.me};S.notes.set(id,note);open(id,'edit');
   markDirty(note);flushSave();
   setTimeout(()=>{const ti=$('titleIn');if(ti&&!title){ti.focus();ti.select()}},30);
 }
 async function saveTask(t){
   S.tasks.set(t.id,t);renderBoard();renderCounts();renderLinks();
-  let row=toTask(t),res=await sb.from('tasks').upsert(row);
-  if(res.error&&/start_date/.test(res.error.message||'')){S.noStartCol=true;delete row.start_date;res=await sb.from('tasks').upsert(row);
-    toast('Start dates can\'t be stored yet. Run the small database update in Supabase (SQL Editor).')}
-  if(res.error){console.error(res.error);toast('Could not save task. Check your connection.')}
+  S.pend.tasks[t.id]=t;persistPend();saveCache();setStatus();await flushPending();
 }
+/* ---------- offline: local copy of everything + queue of changes waiting to upload ---------- */
+const CACHE_KEY='haiduc.cache.v1',PEND_KEY='haiduc.pending.v1';
+let cacheTimer=null,pFlushing=false,pTimer=null;
+function lsJSON(k,d){try{return JSON.parse(localStorage.getItem(k)||'null')??d}catch(e){return d}}
+function saveCache(){clearTimeout(cacheTimer);cacheTimer=setTimeout(()=>{if(!S.me)return;
+  try{localStorage.setItem(CACHE_KEY,JSON.stringify({me:S.me,at:Date.now(),notes:[...S.notes.values()],tasks:[...S.tasks.values()],unsaved:[...S.unsaved.keys()]}))}catch(e){console.warn('local copy too large',e)}},600)}
+function clearLocal(){try{localStorage.removeItem(CACHE_KEY);localStorage.removeItem(PEND_KEY)}catch(e){}S.pend={tasks:{},noteDel:{}}}
+function persistPend(){try{localStorage.setItem(PEND_KEY,JSON.stringify(S.pend))}catch(e){}}
+function pendCount(){return Object.keys(S.pend.tasks).length+Object.keys(S.pend.noteDel).length+S.unsaved.size}
+function applyPend(notes,tasks){for(const [id,v] of Object.entries(S.pend.tasks)){if(v===null)tasks.delete(id);else tasks.set(id,v)}for(const id of Object.keys(S.pend.noteDel))notes.delete(id)}
+const isNetErr=e=>!navigator.onLine||/fetch|network|load failed|timeout|offline/i.test((e&&(e.message||e.details))||'');
+async function upsertTaskRow(t){let row=toTask(t),res;try{res=await sb.from('tasks').upsert(row)}catch(e){res={error:e}}
+  if(res.error&&/start_date/.test(res.error.message||'')){S.noStartCol=true;delete row.start_date;toast('Start dates can\'t be stored yet. Run the small database update in Supabase (SQL Editor).');try{res=await sb.from('tasks').upsert(row)}catch(e){res={error:e}}}
+  return res}
+async function flushPending(){
+  if(pFlushing||!sb)return;pFlushing=true;clearTimeout(pTimer);let failed=null;
+  for(const [id,v] of Object.entries(S.pend.tasks)){let res;
+    if(v===null){try{res=await sb.from('tasks').delete().eq('id',id)}catch(e){res={error:e}}}else res=await upsertTaskRow(v);
+    if(res.error){failed=res.error;break}
+    if(S.pend.tasks[id]===v)delete S.pend.tasks[id]}
+  if(!failed)for(const id of Object.keys(S.pend.noteDel)){let res;try{res=await sb.from('notes').delete().eq('id',id)}catch(e){res={error:e}}
+    if(res.error){failed=res.error;break}delete S.pend.noteDel[id]}
+  persistPend();pFlushing=false;setStatus();
+  if(failed){console.error(failed);if(!isNetErr(failed)&&!S.pendWarned){S.pendWarned=true;toast('Some task changes couldn\'t upload. They\'re kept on this device and will retry.')}
+    if(navigator.onLine)pTimer=setTimeout(flushPending,15000)}
+  else S.pendWarned=false;
+}
+function applyDrafts(map){let restored=0;const drafts=draftsAll();
+  for(const [id,d] of Object.entries(drafts)){
+    if(S.unsaved.has(id)||!d||S.pend.noteDel[id])continue;const srv=map.get(id);
+    if(srv&&(srv.updatedAt>=d.at||(srv.body===d.body&&srv.title===d.title&&(d.folder===undefined||(srv.folder||'')===(d.folder||''))))){draftDel(id);continue}
+    const note=srv?{...srv,title:d.title,body:d.body,folder:d.folder??srv.folder}:{id,title:d.title||'Untitled',body:d.body||'',folder:d.folder||'',createdAt:d.createdAt||d.at,updatedAt:d.at,updatedBy:S.me};
+    map.set(id,note);S.unsaved.set(id,1);restored++}
+  return restored}
+function showCached(c){
+  S.me=c.me;const notes=new Map((c.notes||[]).map(n=>[n.id,n])),tasks=new Map((c.tasks||[]).map(t=>[t.id,t]));
+  applyPend(notes,tasks);S.notes=notes;S.tasks=tasks;
+  for(const id of (c.unsaved||[]))if(S.notes.has(id))S.unsaved.set(id,1);
+  applyDrafts(S.notes);
+  if(!S.cur||!S.notes.has(S.cur)){const last=lsGet('vault.cur');S.cur=last&&S.notes.has(last)?last:(S.notes.size?sortedNotes()[0].id:null)}
+  $('login').hidden=true;$('app').hidden=false;$('meEmail').textContent=S.me;renderAll();
+}
+window.addEventListener('online',()=>{setStatus();if(S.unsaved.size)flushSave();flushPending();if(S.live)loadAll()});
+window.addEventListener('offline',()=>setStatus());
+
 /* ---------- dates ---------- */
 function todayISO(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
 function msISO(ms){const d=new Date(ms||Date.now());return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
@@ -98,7 +150,7 @@ const fmtD=s=>s?new Date(s+'T00:00').toLocaleDateString(undefined,{day:'numeric'
 function taskSpan(t){const s=t.start||(t.due&&msISO(t.createdAt)<=t.due?msISO(t.createdAt):t.due)||msISO(t.createdAt);const e=t.due&&t.due>=s?t.due:s;return{s:d2n(s),e:d2n(e),noStart:!t.start,noDue:!t.due}}
 
 /* ---------- rendering ---------- */
-function renderAll(){renderList();renderMain();renderLinks();renderCounts();setStatus()}
+function renderAll(){renderList();renderMain();renderLinks();renderCounts();setStatus();saveCache()}
 function renderCounts(){const open=[...S.tasks.values()].filter(t=>t.status!=='done').length;$('tbCount').textContent=open?open:'';$('cNotes').textContent=S.notes.size;$('cTasks').textContent=[...S.tasks.values()].filter(t=>t.status!=='done').length}
 function renderList(){
   const ul=$('list');const q=S.q.trim().toLowerCase();
@@ -106,10 +158,47 @@ function renderList(){
   let notes=sortedNotes();if(q.startsWith('#')&&q.length>1){const t=q.slice(1);notes=notes.filter(n=>tagsIn(n.body).has(t))}else if(q)notes=notes.filter(n=>(n.title||'').toLowerCase().includes(q)||(n.body||'').toLowerCase().includes(q));
   $('listLabel').textContent=q?`${notes.length} match${notes.length===1?'':'es'}`:'All notes';
   if(!notes.length){ul.innerHTML=`<li class="empty">${q?'No notes match that search.':(S.live?'No notes yet. Press + Note to start.':'Loading notes…')}</li>`;return}
-  ul.innerHTML=notes.map(n=>{
-    const m=ago(n.updatedAt)+(n.updatedBy&&who(n.updatedBy)!=='you'?' · '+who(n.updatedBy):'');
-    return `<li><button data-id="${esc(n.id)}" aria-current="${S.view==='notes'&&n.id===S.cur}"><span class="t">${esc(n.title||'Untitled')}</span><span class="m">${esc(m)}</span></button></li>`}).join('');
+  const item=n=>{const m=ago(n.updatedAt)+(n.updatedBy&&who(n.updatedBy)!=='you'?' · '+who(n.updatedBy):'')+(q&&n.folder?' · '+n.folder:'');
+    return `<li><button data-id="${esc(n.id)}" aria-current="${S.view==='notes'&&n.id===S.cur}"><span class="t">${esc(n.title||'Untitled')}</span><span class="m">${esc(m)}</span></button></li>`};
+  const groups=allGroups();
+  if(q||!groups.length){ul.innerHTML=notes.map(item).join('');return}
+  const closed=groupsClosed();let html='';
+  for(const g of groups){const gn=notes.filter(n=>n.folder===g);
+    const open=!closed.has(g);
+    html+=`<li class="grp" data-group="${esc(g)}">${S.renaming===g
+      ?`<form class="grp-rename" data-g="${esc(g)}"><input id="grpRenameIn" value="${esc(g)}" aria-label="New group name" maxlength="60"><button class="btn primary" type="submit">OK</button><button class="btn" type="button" data-grp-cancel="1">Cancel</button></form>`
+      :`<div class="grp-head"><button class="grp-toggle" data-grp-toggle="${esc(g)}" aria-expanded="${open}"><span class="caret">${open?'▾':'▸'}</span><span class="gname">${esc(g)}</span><span class="gcount">${gn.length}</span></button><button class="grp-act" data-grp-new="${esc(g)}" title="New note in ${esc(g)}" aria-label="New note in ${esc(g)}">+</button><button class="grp-act" data-grp-rename="${esc(g)}" title="Rename group" aria-label="Rename group ${esc(g)}">✎</button></div>`}
+      ${open?`<ul class="grp-notes">${gn.map(item).join('')}</ul>`:''}</li>`}
+  const loose=notes.filter(n=>!n.folder);
+  if(loose.length)html+=`<li class="grp loose"><div class="grp-head"><span class="gname muted">Not in a group</span><span class="gcount">${loose.length}</span></div><ul class="grp-notes">${loose.map(item).join('')}</ul></li>`;
+  ul.innerHTML=html;
+  const ri=$('grpRenameIn');if(ri&&document.activeElement!==ri){ri.focus();ri.select()}
 }
+/* ---------- groups (folders) ---------- */
+function allGroups(){return [...new Set([...S.notes.values()].map(n=>n.folder).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}))}
+function groupsClosed(){try{return new Set(JSON.parse(localStorage.getItem('haiduc.closedGroups')||'[]'))}catch(e){return new Set()}}
+function setGroupClosed(g,closed){const s=groupsClosed();closed?s.add(g):s.delete(g);try{localStorage.setItem('haiduc.closedGroups',JSON.stringify([...s]))}catch(e){}}
+function cleanGroup(s){return String(s||'').replace(/\s+/g,' ').trim().slice(0,60)}
+function moveToGroup(id,g){const n=S.notes.get(id);if(!n)return;g=cleanGroup(g);if((n.folder||'')===g)return;n.folder=g;markDirty(n);flushSave();renderAll();toast(g?`Moved to ${g}`:'Removed from group')}
+function renameGroup(from,to){to=cleanGroup(to);S.renaming=null;if(!to||to===from){renderList();return}
+  let k=0;S.notes.forEach(n=>{if(n.folder===from){n.folder=to;markDirty(n);k++}});
+  const c=groupsClosed();if(c.has(from)){setGroupClosed(from,false);setGroupClosed(to,true)}
+  flushSave();renderAll();toast(`Renamed group to ${to} (${k} note${k===1?'':'s'})`)}
+function groupPicker(n){const gs=allGroups();
+  return `<div class="grp-pick"><label for="grpSel">Group</label><select id="grpSel"><option value="">No group</option>${gs.map(g=>`<option value="${esc(g)}"${g===n.folder?' selected':''}>${esc(g)}</option>`).join('')}<option value="__new">+ New group…</option></select>
+    <form id="grpNewForm" hidden><input id="grpNewIn" placeholder="Group name, e.g. Leaderboard" maxlength="60" aria-label="New group name"><button class="btn primary" type="submit">Add</button><button class="btn" type="button" id="grpNewCancel">Cancel</button></form></div>`}
+function wireGroupPicker(id){const sel=$('grpSel');if(!sel)return;
+  sel.onchange=()=>{if(sel.value==='__new'){$('grpNewForm').hidden=false;sel.hidden=true;$('grpNewIn').focus()}else moveToGroup(id,sel.value)};
+  $('grpNewForm').onsubmit=e=>{e.preventDefault();const g=cleanGroup($('grpNewIn').value);if(g)moveToGroup(id,g);else{$('grpNewForm').hidden=true;sel.hidden=false;sel.value=(S.notes.get(id)||{}).folder||''}};
+  $('grpNewCancel').onclick=()=>{$('grpNewForm').hidden=true;sel.hidden=false;sel.value=(S.notes.get(id)||{}).folder||''};}
+$('list').addEventListener('click',e=>{
+  const t=e.target.closest('[data-grp-toggle]');if(t){const g=t.dataset.grpToggle;setGroupClosed(g,t.getAttribute('aria-expanded')==='true');renderList();return}
+  const nw=e.target.closest('[data-grp-new]');if(nw){setGroupClosed(nw.dataset.grpNew,false);createNote(null,nw.dataset.grpNew);return}
+  const rn=e.target.closest('[data-grp-rename]');if(rn){S.renaming=rn.dataset.grpRename;renderList();return}
+  if(e.target.closest('[data-grp-cancel]')){S.renaming=null;renderList()}
+});
+$('list').addEventListener('submit',e=>{const f=e.target.closest('.grp-rename');if(!f)return;e.preventDefault();renameGroup(f.dataset.g,$('grpRenameIn').value)});
+
 /* #tags (Obsidian style): ignored inside code blocks and `inline code`; '# Heading' (with a space) stays a heading */
 const TAG_RE=/(^|[\s(\[,;])#([\p{L}_][\p{L}\p{N}_\/-]*)#?(?=$|[\s.,;:!?)\]])/gu;
 function mapOutsideCode(src,fn){let fence=false;return (src||'').split('\n').map(line=>{
@@ -154,12 +243,13 @@ function renderMain(){
   if(S.mode==='edit'){
     if($('bodyIn')&&v.dataset.id===n.id){
       $('metaLine').innerHTML=meta;
+      const gp=v.querySelector('.grp-pick');if(gp&&!gp.contains(document.activeElement)){gp.outerHTML=groupPicker(n);wireGroupPicker(n.id)}
       if(!S.unsaved.has(n.id)){const ta=$('bodyIn'),ti=$('titleIn');
         if(ta.value!==n.body){const pos=Math.min(ta.selectionStart,n.body.length);ta.value=n.body;ta.setSelectionRange(pos,pos);paintHl()}
         if(ti.value!==n.title&&document.activeElement!==ti)ti.value=n.title}
       return}
     v.dataset.id=n.id;
-    v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta" id="metaLine">${meta}</div>
+    v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta-row"><div class="meta" id="metaLine">${meta}</div>${groupPicker(n)}</div>
     <div class="fmt" id="fmtBar" role="toolbar" aria-label="Formatting">
       <button type="button" data-f="h1" title="Heading 1">H1</button><button type="button" data-f="h2" title="Heading 2">H2</button><button type="button" data-f="h3" title="Heading 3">H3</button>
       <button type="button" data-f="b" title="Bold"><b>B</b></button><button type="button" data-f="i" title="Italic"><i>I</i></button>
@@ -173,12 +263,13 @@ function renderMain(){
     $('bodyIn').oninput=e=>{const cur=S.notes.get(eid);if(!cur)return;cur.body=e.target.value;paintHl();autosize(e.target);markDirty(cur)};
     $('fmtBar').onmousedown=e=>e.preventDefault();
     $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
-    paintHl();autosize($('bodyIn'));
+    paintHl();autosize($('bodyIn'));wireGroupPicker(eid);
   }else{
     v.dataset.id='';
-    v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta">${meta}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
+    v.innerHTML=`<div class="note-inner"><h1 class="title-in" style="margin:0">${esc(n.title||'Untitled')}</h1><div class="meta-row"><div class="meta">${meta}</div>${groupPicker(n)}</div><div class="prose" id="prose">${n.body?renderMarkdown(n.body):'<p class="hint">This note is empty. Switch to Edit to write.</p>'}</div></div>`;
     if(PH.matches)v.querySelector('.note-inner').insertAdjacentHTML('beforeend','<section class="links-inline" id="linksInline"></section>');
     v.querySelectorAll('#prose input[type=checkbox]').forEach((cb,i)=>{cb.disabled=false;cb.onchange=()=>toggleCheck(n,i)});
+    wireGroupPicker(n.id);
   }
 }
 /* Edit-mode formatting: a colored copy of the text sits behind the transparent textarea.
@@ -359,7 +450,7 @@ $('board').addEventListener('click',async e=>{
   if(b.dataset.move)await saveTask({...t,status:b.dataset.move});
   else if(b.dataset.assign){const mine=t.assignee&&t.assignee.toLowerCase()===S.me.toLowerCase();await saveTask({...t,assignee:mine?'':S.me})}
   else if(b.dataset.del){
-    if(b.dataset.arm){S.tasks.delete(t.id);renderBoard();renderCounts();await run(sb.from('tasks').delete().eq('id',t.id),'task')}
+    if(b.dataset.arm){S.tasks.delete(t.id);renderBoard();renderCounts();S.pend.tasks[t.id]=null;persistPend();saveCache();await flushPending()}
     else{b.dataset.arm='1';b.textContent='Delete?';b.style.color='var(--warn)';setTimeout(()=>{if(b.isConnected){delete b.dataset.arm;b.textContent='✕';b.style.color=''}},3000)}
   }
 });
@@ -375,7 +466,7 @@ $('board').addEventListener('dragover',e=>{const col=e.target.closest('.col');if
 $('board').addEventListener('drop',async e=>{const col=e.target.closest('.col');document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'));if(col&&dragId){e.preventDefault();const t=S.tasks.get(dragId);dragId=null;if(t&&t.status!==col.dataset.s)await saveTask({...t,status:col.dataset.s})}});
 $('board').addEventListener('dragend',()=>{dragId=null;document.querySelectorAll('.col.drop').forEach(c=>c.classList.remove('drop'))});
 
-function open(id,mode){S.hist=null;if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
+function open(id,mode){S.hist=null;{const nn=S.notes.get(id);if(nn&&nn.folder)setGroupClosed(nn.folder,false)}if(S.unsaved.size)flushSave();S.cur=id;S.phList=false;S.view='notes';if(mode)S.mode=mode;lsSet('vault.cur',id);$('app').classList.remove('drawer');renderAll();$('noteView').scrollTop=0}
 $('list').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)open(b.dataset.id,'read')});
 $('links').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
@@ -406,7 +497,7 @@ document.addEventListener('click',e=>{const app=$('app');if(app.classList.contai
 $('delBtn').onclick=async()=>{
   const b=$('delBtn');const n=S.notes.get(S.cur);if(!n)return;
   if(!b.classList.contains('arm')){b.classList.add('arm');b.textContent='Confirm delete';setTimeout(()=>{b.classList.remove('arm');b.textContent='Delete'},3000);return}
-  S.unsaved.delete(n.id);draftDel(n.id);S.notes.delete(n.id);S.cur=null;renderAll();await run(sb.from('notes').delete().eq('id',n.id),'note');toast('Note deleted');
+  S.unsaved.delete(n.id);draftDel(n.id);S.notes.delete(n.id);S.cur=null;S.pend.noteDel[n.id]=true;persistPend();renderAll();flushPending();toast('Note deleted');
 };
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='e'&&S.view==='notes'&&S.cur){e.preventDefault();S.mode==='edit'?$('mRead').click():$('mEdit').click()}
@@ -428,23 +519,20 @@ function onChange(table,p){
 }
 async function loadAll(){
   const [n,t]=await Promise.all([sb.from('notes').select('*'),sb.from('tasks').select('*')]);
-  if(n.error||t.error){toast('Could not load your notes. Reload the page.');return}
+  if(n.error||t.error){const er=n.error||t.error;console.error(er);setStatus();if(!isNetErr(er))toast('Could not load your notes. Reload the page.');return false}
   const fresh=new Map(n.data.map(r=>[r.id,fromNote(r)]));
   // never let server data replace text that hasn't reached the server yet
   for(const id of S.unsaved.keys()){const local=S.notes.get(id);if(local)fresh.set(id,local)}
   for(const [id,srv] of fresh){const local=S.notes.get(id);if(local&&local!==srv&&staleForMe(srv,local))fresh.set(id,local)}
-  let restored=0;const drafts=draftsAll();
-  for(const [id,d] of Object.entries(drafts)){
-    if(S.unsaved.has(id)||!d)continue;const srv=fresh.get(id);
-    if(srv&&(srv.updatedAt>=d.at||(srv.body===d.body&&srv.title===d.title))){draftDel(id);continue}
-    const note=srv?{...srv,title:d.title,body:d.body}:{id,title:d.title||'Untitled',body:d.body||'',createdAt:d.createdAt||d.at,updatedAt:d.at,updatedBy:S.me};
-    fresh.set(id,note);S.unsaved.set(id,1);restored++;
-  }
-  S.notes=fresh;S.tasks=new Map(t.data.map(r=>[r.id,fromTask(r)]));
+  const restored=applyDrafts(fresh);
+  const ftasks=new Map(t.data.map(r=>[r.id,fromTask(r)]));applyPend(fresh,ftasks);
+  S.notes=fresh;S.tasks=ftasks;
   if(!S.cur||!S.notes.has(S.cur)){const last=lsGet('vault.cur');S.cur=last&&S.notes.has(last)?last:(S.notes.size?sortedNotes()[0].id:null)}
   S.live=true;renderAll();
   if(restored)toast(restored===1?'Restored 1 note that hadn\'t been saved yet. Saving it now.':'Restored '+restored+' notes that hadn\'t been saved yet. Saving them now.');
   if(S.unsaved.size)flushSave();
+  if(Object.keys(S.pend.tasks).length||Object.keys(S.pend.noteDel).length)flushPending();
+  return true;
 }
 function subscribe(){
   if(channel)sb.removeChannel(channel);
@@ -454,8 +542,7 @@ function subscribe(){
     .subscribe(st=>{if(st==='SUBSCRIBED'&&S.live)loadAll()});
 }
 // refresh after the tab was asleep (laptop lid, phone background)
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(S.unsaved.size)flushSave()}else if(S.live)loadAll()});
-window.addEventListener('online',()=>{if(S.unsaved.size)flushSave()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(S.unsaved.size)flushSave()}else if(S.live&&navigator.onLine)loadAll()});
 
 /* ---------- auth ---------- */
 function showLogin(msg,isErr){
@@ -463,9 +550,16 @@ function showLogin(msg,isErr){
   const m=$('loginMsg');m.textContent=msg||'';m.className='msg'+(isErr?' err':'');m.hidden=!msg;
 }
 async function enter(session){
-  S.me=session.user.email;
-  const {data,error}=await sb.from('members').select('email').limit(1);
-  if(error||!data||!data.length){await sb.auth.signOut();showLogin(`${S.me} isn't on the members list. Ask the owner to add you.`,true);return}
+  const email=session.user.email;const c=lsJSON(CACHE_KEY,null);
+  if(c&&c.me&&c.me.toLowerCase()!==email.toLowerCase()){clearLocal();S.notes.clear();S.tasks.clear()}
+  S.me=email;
+  let res;try{res=await sb.from('members').select('email').limit(1)}catch(e){res={error:e}}
+  const {data,error}=res;
+  if(error&&isNetErr(error)){ // offline: work from the copy on this device, finish signing in when back online
+    if(!S.notes.size&&c&&c.me&&c.me.toLowerCase()===email.toLowerCase())showCached(c);
+    $('login').hidden=true;$('app').hidden=false;$('meEmail').textContent=S.me;renderAll();
+    window.addEventListener('online',()=>enter(session),{once:true});return}
+  if(error||!data||!data.length){await sb.auth.signOut();clearLocal();S.notes.clear();S.tasks.clear();showLogin(`${S.me} isn't on the members list. Ask the owner to add you.`,true);return}
   $('login').hidden=true;$('app').hidden=false;$('meEmail').textContent=S.me;
   renderAll();await loadAll();subscribe();
 }
@@ -513,9 +607,13 @@ $('setPass').onclick=async()=>{
       if(error)toast(authMsg(error));else{toast('Password saved. Next time, sign in with email and password.');box.remove();delete b.dataset.open;b.textContent='Set password'}};
   }else{const box=$('passBox');box&&box.remove();delete b.dataset.open;b.textContent='Set password'}
 };
-$('signOut').onclick=async()=>{if(S.unsaved.size)await flushSave();if(channel)sb.removeChannel(channel);await sb.auth.signOut();S.notes.clear();S.tasks.clear();S.live=false;showLogin()};
+$('signOut').onclick=async()=>{
+  if(S.unsaved.size)await flushSave();await flushPending();
+  if(pendCount()){toast('Some changes haven\'t uploaded yet. Connect to the internet first, or they\'ll be lost when you sign out.');return}
+  if(channel)sb.removeChannel(channel);await sb.auth.signOut();clearLocal();S.notes.clear();S.tasks.clear();S.live=false;S.me=null;showLogin()};
 
 function boot(){
+  if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(e=>console.warn('offline cache unavailable',e));
   $('tStart').value=todayISO();setTimeout(()=>setTv(S.tv),0);
   if(!CFG.SUPABASE_URL||!CFG.SUPABASE_ANON_KEY||CFG.SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')){showLogin('Haiduc is not connected yet: add your Supabase URL and anon key to config.js.',true);$('loginForm').hidden=true;return}
   sb=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_ANON_KEY);
@@ -526,8 +624,16 @@ function boot(){
   });
   const hp=new URLSearchParams((location.hash||'').slice(1)+'&'+(location.search||'').slice(1));
   const linkErr=hp.get('error_description')||hp.get('error');
-  sb.auth.getSession().then(({data})=>{
+  // open straight away from the copy on this device (works with no internet), then refresh from the server
+  const cached=lsJSON(CACHE_KEY,null);let fromCache=false;
+  if(cached&&cached.me){showCached(cached);fromCache=true}
+  const retryAuth=()=>sb.auth.getSession().then(({data})=>{if(data.session&&!entered){entered=true;enter(data.session)}else if(!data.session&&!entered&&navigator.onLine&&!fromCache)showLogin()});
+  sb.auth.getSession().then(({data,error})=>{
+    if(!data.session&&!entered&&fromCache&&(!navigator.onLine||(error&&isNetErr(error)))){
+      setStatus();toast('You\'re offline. Showing what\'s saved on this device.');
+      window.addEventListener('online',retryAuth,{once:true});return}
     if(!data.session&&!entered){
+      if(fromCache){S.notes.clear();S.tasks.clear();S.me=null}
       showLogin(linkErr?('That sign-in link didn\'t work ('+linkErr.replace(/\+/g,' ')+'). It was probably expired or already used. Sign in with your password, or request a new link.'):'',!!linkErr);
       if(linkErr)history.replaceState(null,'',location.pathname);
     }
