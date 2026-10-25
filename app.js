@@ -212,7 +212,12 @@ function mapOutsideCode(src,fn){let fence=false;return (src||'').split('\n').map
 function tagsIn(body){const out=new Set();mapOutsideCode(body,t=>{t.replace(TAG_RE,(m,pre,tag)=>{out.add(tag.toLowerCase());return m});return t});return out}
 function allTags(){const c=new Map();S.notes.forEach(n=>tagsIn(n.body).forEach(t=>c.set(t,(c.get(t)||0)+1)));return [...c].sort((x,y)=>y[1]-x[1]||x[0].localeCompare(y[0]))}
 function showTag(tag){if(S.unsaved.size)flushSave();S.q='#'+tag;$('q').value=S.q;S.view='notes';S.phList=true;renderAll()}
+function keepIndents(src){let fence=false;return (src||'').split('\n').map(l=>{
+  if(/^\s*(```|~~~)/.test(l)){fence=!fence;return l}if(fence)return l;
+  const m=l.match(/^((?:\t| {4})+)(?!\s*(?:[-*+]|\d+\.)\s)(?=\S)/);if(!m)return l;
+  const n=(m[1].match(/\t| {4}/g)||[]).length;return '&emsp;&emsp;'.repeat(n)+l.slice(m[1].length)}).join('\n')}
 function renderMarkdown(src){
+  src=keepIndents(src);
   src=mapOutsideCode(src,t=>t.replace(TAG_RE,(m,pre,tag)=>`${pre}<a class="tag" data-tag="${esc(tag.toLowerCase())}">#${esc(tag)}</a>`));
   const withLinks=(src||'').replace(/\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]/g,(m,t,alias)=>{
     t=t.trim();const ex=byTitle(t);return `<a class="wl${ex?'':' missing'}" data-note="${esc(t)}">${esc((alias||t).trim())}</a>`});
@@ -256,10 +261,12 @@ function renderMain(){
     v.dataset.id=n.id;
     v.innerHTML=`<div class="note-inner"><input class="title-in" id="titleIn" aria-label="Note title" value="${esc(n.title)}"><div class="meta" id="metaLine">${meta}</div>
     <div class="fmt" id="fmtBar" role="toolbar" aria-label="Formatting">
-      <button type="button" data-f="h1" title="Heading 1">H1</button><button type="button" data-f="h2" title="Heading 2">H2</button><button type="button" data-f="h3" title="Heading 3">H3</button>
-      <button type="button" data-f="b" title="Bold"><b>B</b></button><button type="button" data-f="i" title="Italic"><i>I</i></button>
-      <button type="button" data-f="ul" title="List">• List</button><button type="button" data-f="todo" title="To-do">☐ To-do</button>
-      <button type="button" data-f="link" title="Link to note">[[ ]]</button><button type="button" data-f="tag" title="Tag">#</button>
+      <button type="button" data-f="undo" title="Undo (${kc('undo')})" aria-label="Undo">↶</button><button type="button" data-f="redo" title="Redo (${kc('redo')})" aria-label="Redo">↷</button><span class="fmt-sep"></span>
+      <button type="button" data-f="h1" title="Heading 1 (${kc('h1')})">H1</button><button type="button" data-f="h2" title="Heading 2 (${kc('h2')})">H2</button><button type="button" data-f="h3" title="Heading 3 (${kc('h3')})">H3</button>
+      <button type="button" data-f="b" title="Bold (${kc('b')})"><b>B</b></button><button type="button" data-f="i" title="Italic (${kc('i')})"><i>I</i></button><button type="button" data-f="u" title="Underline (${kc('u')})" aria-label="Underline"><u>U</u></button><button type="button" data-f="s" title="Strikethrough (${kc('s')})" aria-label="Strikethrough"><s>S</s></button><button type="button" data-f="hl" title="Highlight (${kc('hl')})"><mark class="fmt-mark">H</mark></button>
+      <button type="button" data-f="ul" title="List (${kc('ul')})">• List</button><button type="button" data-f="todo" title="To-do (${kc('todo')})">☐ To-do</button>
+      <button type="button" data-f="link" title="Link to note (${kc('link')})">[[ ]]</button><button type="button" data-f="tag" title="Tag">#</button>
+      <button type="button" class="fmt-keys" id="keysBtn" title="Keyboard shortcuts (${kc('help')})" aria-label="Keyboard shortcuts">⌨</button>
     </div>
     <div class="editor"><pre class="hl" id="bodyHl" aria-hidden="true"></pre><textarea class="body" id="bodyIn" aria-label="Note text" placeholder="Start writing…" spellcheck="true" aria-autocomplete="list" aria-controls="linkPop">${esc(n.body)}</textarea><div class="link-pop" id="linkPop" role="listbox" hidden></div></div>
     <div class="hint"><code>[[Other note]]</code> link · <code>#tag</code> · <code># Heading</code> · <code>- [ ] to-do</code> · <code>**bold**</code> · <code>==highlight==</code></div></div>`;
@@ -272,7 +279,7 @@ function renderMain(){
     $('linkPop').addEventListener('pointerdown',e=>e.preventDefault()); // keep the keyboard open on phones
     $('linkPop').addEventListener('click',e=>{const it=e.target.closest('[data-i]');if(it){LS.i=+it.dataset.i;linkAccept()}});
     $('fmtBar').onmousedown=e=>e.preventDefault();
-    $('fmtBar').onclick=e=>{const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
+    $('fmtBar').onclick=e=>{if(e.target.closest('#keysBtn')){showKeys();return}const b=e.target.closest('[data-f]');if(b)applyFmt(b.dataset.f)};
     paintHl();autosize($('bodyIn'));
   }else{
     v.dataset.id='';
@@ -290,6 +297,8 @@ function hlLine(line){
   s=s.replace(/\[\[[^\[\]]+\]\]/g,m=>`<span class="hk">${m}</span>`)
      .replace(/\*\*[^*]+\*\*/g,m=>`<span class="hb">${m}</span>`)
      .replace(/==[^=]+==/g,m=>`<span class="hm">${m}</span>`)
+     .replace(/~~[^~]+~~/g,m=>`<span class="hs">${m}</span>`)
+     .replace(/&lt;u&gt;.*?&lt;\/u&gt;/g,m=>`<span class="hu">${m}</span>`)
      .replace(/(^|[\s(\[,;])(#[\p{L}_][\p{L}\p{N}_\/-]*)/gu,(m,p,t)=>`${p}<span class="ht">${t}</span>`)
      .replace(/^(\s*)([-*+]|\d+\.)(\s+\[[ xX]\])?(?=\s)/,(m,sp,b,c)=>`${sp}<span class="hl-b">${b}${c||''}</span>`);
   return s;
@@ -303,9 +312,29 @@ function applyFmt(f){
   const lineFx=fn=>{const lines=v.slice(ls,le).split('\n').map(fn).join('\n');set(lines,ls,le,ls+lines.length,ls+lines.length)};
   const heading=n=>lineFx(l=>{const m=l.match(/^ {0,3}(#{1,6})\s+/);const rest=m?l.slice(m[0].length):l;return m&&m[1].length===n?rest:'#'.repeat(n)+' '+rest});
   const prefix=p=>lineFx(l=>l.startsWith(p)?l.slice(p.length):p+l.replace(/^([-*+]\s+(\[[ xX]\]\s+)?)/,''));
-  const wrap=(o,c,ph)=>{const sel=v.slice(s,e)||ph;set(o+sel+c,s,e,s+o.length,s+o.length+sel.length)};
+  const wrap=(o,c,ph)=>{
+    const sel=v.slice(s,e);
+    // already wrapped (markers just outside or inside the selection)? then remove them
+    const outside=v.slice(s-o.length,s)===o&&v.slice(e,e+c.length)===c&&!(o==='*'&&(v[s-2]==='*'||v[e+1]==='*'));
+    if(sel&&outside){set(sel,s-o.length,e+c.length,s-o.length,e-o.length);return}
+    if(sel.length>=o.length+c.length&&sel.startsWith(o)&&sel.endsWith(c)&&!(o==='*'&&sel.startsWith('**'))){const inner=sel.slice(o.length,sel.length-c.length);set(inner,s,e,s,s+inner.length);return}
+    const t=sel||ph;set(o+t+c,s,e,s+o.length,s+o.length+t.length)};
+  // Tab / Shift+Tab: move the selected lines right or left (a tab is 4 spaces wide)
+  const indent=right=>{
+    const multi=v.slice(s,e).includes('\n');
+    let first=0,total=0;
+    const lines=v.slice(ls,le).split('\n').map((l,i)=>{let n;
+      if(right)n='\t'+l;else n=l.replace(/^(\t| {1,4})/,'');
+      const d=n.length-l.length;if(i===0)first=d;total+=d;return n}).join('\n');
+    if(!total)return;
+    set(lines,ls,le,multi?ls:Math.max(ls,s+first),multi?ls+lines.length:Math.max(ls,e+first))};
+  const todoToggle=()=>lineFx(l=>{const m=l.match(/^(\s*[-*+]\s+)\[( |x|X)\]\s?/);if(m)return m[1]+(m[2]===' '?'[x] ':'[ ] ')+l.slice(m[0].length);
+    const b=l.match(/^(\s*)[-*+]\s+/);return b?b[1]+'- [ ] '+l.slice(b[0].length):'- [ ] '+l});
   if(f==='h1')heading(1);else if(f==='h2')heading(2);else if(f==='h3')heading(3);
-  else if(f==='b')wrap('**','**','bold text');else if(f==='i')wrap('*','*','italic text');
+  else if(f==='b')wrap('**','**','bold text');else if(f==='i')wrap('*','*','italic text');else if(f==='hl')wrap('==','==','highlighted text');else if(f==='u')wrap('<u>','</u>','underlined text');else if(f==='s')wrap('~~','~~','crossed-out text');
+  else if(f==='undo'||f==='redo'){ta.focus();document.execCommand(f)}
+  else if(f==='indent'||f==='outdent')indent(f==='indent');
+  else if(f==='todoToggle')todoToggle();
   else if(f==='ul')prefix('- ');else if(f==='todo')prefix('- [ ] ');
   else if(f==='link')wrap('[[',']]','Note name');
   else if(f==='tag'){const sel=v.slice(s,e).replace(/\s+/g,'-')||'tag';set('#'+sel,s,e,s+1,s+1+sel.length)}
@@ -346,7 +375,29 @@ function linkPlace(){
   if(r.bottom>vh-8)pop.scrollIntoView({block:'nearest'});
 }
 function linkClose(){LS.open=false;const p=$('linkPop');if(p)p.hidden=true}
+/* ---------- keyboard shortcuts: ⌘ on Mac, Ctrl on Windows/Linux ---------- */
+const IS_MAC=/Mac|iPhone|iPad/.test((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||navigator.userAgent);
+const KEYS={undo:['Z'],redo:['Shift','Z'],u:['U'],s:['Shift','X'],b:['B'],i:['I'],link:['K'],hl:['Shift','H'],h1:['Alt','1'],h2:['Alt','2'],h3:['Alt','3'],ul:['Shift','8'],todo:['Enter'],edit:['E'],save:['S'],help:['/']};
+function kc(id){if(id==='redo'&&!IS_MAC)return 'Ctrl+Y';const k=KEYS[id];if(!k)return'';return IS_MAC?'⌘'+k.map(x=>x==='Shift'?'⇧':x==='Alt'?'⌥':x).join(''):'Ctrl+'+k.join('+')}
+function modKey(e){return IS_MAC?e.metaKey&&!e.ctrlKey:e.ctrlKey&&!e.metaKey}
+function editorShortcut(e){
+  if(!modKey(e))return false;const k=e.key.toLowerCase(),c=e.code;let f=null;
+  if(!e.shiftKey&&!e.altKey){if(k==='b')f='b';else if(k==='i')f='i';else if(k==='u')f='u';else if(k==='k')f='link';else if(k==='enter')f='todoToggle'}
+  else if(e.shiftKey&&!e.altKey){if(c==='KeyX')f='s';else if(c==='KeyH')f='hl';else if(c==='Digit8')f='ul'}
+  else if(e.altKey&&!e.shiftKey){if(c==='Digit1')f='h1';else if(c==='Digit2')f='h2';else if(c==='Digit3')f='h3'}
+  if(!f)return false;e.preventDefault();linkClose();applyFmt(f);if(f==='link')linkSuggest();return true}
+function showKeys(){
+  let d=$('keysDlg');if(d){d.remove();return}
+  const rows=[['Undo','undo'],['Redo','redo'],['Bold','b'],['Italic','i'],['Underline','u'],['Strikethrough','s'],['Highlight','hl'],['Link to a note','link'],['Heading 1 / 2 / 3','h1'],['Bullet list','ul'],['To-do on / off','todo'],['Move lines right / left','tab'],['Switch Edit / Read','edit'],['Save now','save'],['Show this list','help']];
+  d=document.createElement('div');d.id='keysDlg';d.className='keys-dlg';d.setAttribute('role','dialog');d.setAttribute('aria-label','Keyboard shortcuts');
+  d.innerHTML=`<div class="keys-box"><div class="hist-head"><h2>Keyboard shortcuts</h2><button class="btn" id="keysClose">Close</button></div>
+    <table>${rows.map(([l,id])=>`<tr><td>${l}</td><td><kbd>${id==='tab'?'Tab / Shift+Tab':id==='h1'?kc('h1').replace(/1$/,'1 / 2 / 3'):kc(id)}</kbd></td></tr>`).join('')}</table>
+    <p class="hint">Bold, italic and highlight switch off when pressed again. Type <code>[[</code> to pick a note to link.</p></div>`;
+  document.body.appendChild(d);const close=()=>{d.remove();const ta=$('bodyIn');if(ta)ta.focus()};
+  $('keysClose').onclick=close;d.addEventListener('click',e=>{if(e.target===d)close()});d.addEventListener('keydown',e=>{if(e.key==='Escape')close()});$('keysClose').focus()}
 function linkKeys(e){
+  if(editorShortcut(e))return;
+  if(e.key==='Tab'&&!LS.open&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();applyFmt(e.shiftKey?'outdent':'indent');return}
   if(!LS.open)return;
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();LS.i=(LS.i+(e.key==='ArrowDown'?1:-1)+LS.items.length)%LS.items.length;
     [...$('linkPop').querySelectorAll('.lp-item')].forEach((el,i)=>{el.classList.toggle('on',i===LS.i);el.setAttribute('aria-selected',i===LS.i)});return}
@@ -722,7 +773,7 @@ $('noteView').addEventListener('click',e=>{
   const a=e.target.closest('a.wl');if(!a)return;e.preventDefault();const ex=byTitle(a.dataset.note);ex?open(ex.id,'read'):createNote(a.dataset.note)});
 $('navNotes').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='notes';renderAll()};
 $('navTasks').onclick=()=>{S.backupOpen=false;if(S.unsaved.size)flushSave();S.view='tasks';$('app').classList.remove('drawer');renderAll()};
-$('mEdit').onclick=()=>{S.hist=null;S.mode='edit';renderMain();setTimeout(()=>$('bodyIn')&&$('bodyIn').focus(),20)};
+$('mEdit').onclick=()=>{S.hist=null;S.mode='edit';renderMain();setTimeout(()=>{const t=$('bodyIn');if(!t)return;t.focus();const n=t.value.length;t.setSelectionRange(n,n);const r=t.getBoundingClientRect();if(r.bottom>window.innerHeight)t.closest('.note').scrollTop=t.closest('.note').scrollHeight},20)};
 $('mRead').onclick=()=>{S.hist=null;if(S.unsaved.size)flushSave();S.mode='read';renderMain();renderLinks()};
 $('newNote').onclick=()=>createNote();
 $('saveBtn').onclick=()=>{const n=S.notes.get(S.cur);if(n&&!S.unsaved.size)return;flushSave()};
@@ -743,6 +794,7 @@ $('delBtn').onclick=async()=>{
   S.unsaved.delete(n.id);draftDel(n.id);S.notes.delete(n.id);S.cur=null;S.pend.noteDel[n.id]=true;persistPend();renderAll();flushPending();toast('Note deleted');
 };
 document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&(e.key==='/'||e.code==='Slash')&&!e.altKey){e.preventDefault();showKeys();return}
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='e'&&S.view==='notes'&&S.cur){e.preventDefault();S.mode==='edit'?$('mRead').click():$('mEdit').click()}
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();flushSave()}
 });
